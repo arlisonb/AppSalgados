@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Iona Salgados</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+  <div class="phone-frame">
+    <header id="topbar" class="topbar">
+      <button id="btn-back" class="icon-btn hidden" aria-label="Voltar">←</button>
+      <div class="topbar-title">
+        <h1 id="page-title">Iona Salgados</h1>
+        <p id="page-subtitle"></p>
+      </div>
+      <div class="topbar-actions">
+        <span id="badge-online" class="badge offline">Offline</span>
+        <button id="btn-refresh" class="icon-btn" aria-label="Atualizar">↻</button>
+      </div>
+    </header>
+
+    <main id="app">
+      <!-- HOME -->
+      <section id="view-home" class="view active">
+        <p class="section-label">Menu Principal</p>
+        <div class="menu-grid">
+          <button class="menu-card blue" data-view="pedidos">🛒 Pedidos</button>
+          <button class="menu-card blue" data-view="dashboard">📊 Painel</button>
+          <button class="menu-card orange" data-view="producao">🍳 Produção</button>
+          <button class="menu-card green" data-view="cardapio">🍽 Cardápio</button>
+          <button class="menu-card purple" data-view="clientes">👥 Clientes</button>
+          <button class="menu-card teal" data-view="whatsapp">💬 WhatsApp</button>
+          <button class="menu-card brown" data-view="config">⚙ Configurações</button>
+        </div>
+      </section>
+
+      <!-- PEDIDOS -->
+      <section id="view-pedidos" class="view">
+        <div id="pedidos-list" class="list"></div>
+        <div id="pedido-detalhe" class="panel hidden"></div>
+      </section>
+
+      <!-- DASHBOARD -->
+      <section id="view-dashboard" class="view">
+        <div id="dashboard-cards" class="cards"></div>
+        <div id="dashboard-pedidos" class="list hidden"></div>
+      </section>
+
+      <!-- PRODUÇÃO -->
+      <section id="view-producao" class="view">
+        <div id="producao-content" class="list"></div>
+      </section>
+
+      <!-- CARDÁPIO -->
+      <section id="view-cardapio" class="view">
+        <form id="form-produto" class="form-card">
+          <h3>Novo produto</h3>
+          <input name="nome" placeholder="Nome do produto" required>
+          <input name="categoria_nome" placeholder="Categoria" required>
+          <input name="preco_unidade" type="number" step="0.01" min="0" placeholder="Preço unitário (R$)">
+          <input name="preco_cento" type="number" step="0.01" min="0" placeholder="Preço cento — 100 un (R$)">
+          <button type="submit" class="btn primary">Salvar produto</button>
+        </form>
+        <div id="cardapio-list" class="list"></div>
+      </section>
+
+      <!-- CLIENTES -->
+      <section id="view-clientes" class="view">
+        <div id="clientes-list" class="list"></div>
+      </section>
+
+      <!-- WHATSAPP -->
+      <section id="view-whatsapp" class="view">
+        <div id="wa-connected" class="wa-connected hidden">
+          <div class="coxinha">🥟</div>
+          <h2>Bot conectado!</h2>
+          <p>Atendimento automático ativo</p>
+          <button id="btn-wa-desconectar" class="btn danger" style="margin-top:20px">Desconectar WhatsApp</button>
+        </div>
+        <div id="wa-form" class="form-card">
+          <label>Número para atendimento (DDI)</label>
+          <input id="wa-telefone" placeholder="5534996677668">
+          <button id="btn-wa-codigo" class="btn wa">Gerar código de conexão</button>
+          <div id="wa-code-box" class="code-box hidden">
+            <p>Código de conexão</p>
+            <div id="wa-code" class="code"></div>
+            <button id="btn-copy-code" class="btn outline">📋 Copiar código</button>
+          </div>
+          <p id="wa-msg" class="hint"></p>
+        </div>
+      </section>
+
+      <!-- CONFIG -->
+      <section id="view-config" class="view">
+        <div class="form-card">
+          <p class="hint">Servidor detectado automaticamente neste navegador.</p>
+          <p id="config-url" class="mono"></p>
+        </div>
+        <form id="form-config" class="form-card">
+          <h3>Empresa</h3>
+          <input name="nome_empresa" placeholder="Nome da empresa">
+          <input name="telefone" placeholder="Telefone">
+          <input name="endereco" placeholder="Endereço">
+          <input name="pix" placeholder="Chave PIX">
+          <button type="submit" class="btn primary">Salvar</button>
+        </form>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

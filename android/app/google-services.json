@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "42490821668",
+    "project_id": "iona-salgados",
+    "storage_bucket": "iona-salgados.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:42490821668:android:f50a1fa4977a50f89decb1",
+        "android_client_info": {
+          "package_name": "com.ionasalgados.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDcfX6FCybf82JSrflPOQn7e-dMDBFTnds"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,29 @@
+# APK / builds
+*.apk
+*.aab
+
+# Server — dados e segredos
+server/node_modules/
+server/data/
+server/uploads/
+server/backups/
+server/tokens/
+server/.env
+server/firebase-service-account.json
+server/*.log
+server/google-services*.json
+
+# Android
+android/.gradle/
+android/local.properties
+android/.idea/
+android/**/build/
+android/**/*.keystore
+android/captures/
+android/.cxx/
+android/.externalNativeBuild/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+*.iml

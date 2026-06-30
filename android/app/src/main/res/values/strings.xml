@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Iona Salgados</string>
+    <string name="menu_pedidos">Pedidos</string>
+    <string name="menu_producao">Produção</string>
+    <string name="menu_cardapio">Cardápio</string>
+    <string name="menu_clientes">Clientes</string>
+    <string name="menu_financeiro">Financeiro</string>
+    <string name="menu_relatorios">Relatórios</string>
+    <string name="menu_configuracoes">Configurações</string>
+    <string name="dashboard_titulo">Painel</string>
+    <string name="pedidos_hoje">Pedidos Hoje</string>
+    <string name="pedidos_pendentes">Pendentes</string>
+    <string name="pedidos_finalizados">Finalizados</string>
+    <string name="valor_hoje">Vendido Hoje</string>
+    <string name="valor_mes">Vendido no Mês</string>
+    <string name="status_novo">Novo</string>
+    <string name="status_confirmado">Confirmado</string>
+    <string name="status_preparando">Preparando</string>
+    <string name="status_pronto">Pronto</string>
+    <string name="status_saiu_entrega">Saiu p/ Entrega</string>
+    <string name="status_finalizado">Finalizado</string>
+    <string name="status_cancelado">Cancelado</string>
+    <string name="confirmar">Confirmar</string>
+    <string name="cancelar">Cancelar</string>
+    <string name="salvar">Salvar</string>
+    <string name="voltar">Voltar</string>
+    <string name="imprimir">Imprimir</string>
+    <string name="sem_conexao">Sem conexão com o servidor</string>
+    <string name="reconectando">Reconectando…</string>
+    <string name="notif_channel_pedidos">Novos pedidos</string>
+    <string name="notif_channel_pedidos_desc">Avisos de pedidos recebidos pelo WhatsApp</string>
+    <string name="notif_channel_entrega">Entregas</string>
+    <string name="notif_channel_entrega_desc">Confirmação de entrega pelo cliente</string>
+    <string name="notif_channel_monitor">Monitoramento</string>
+    <string name="notif_channel_monitor_desc">Mantém o app conectado ao servidor</string>
+    <string name="notif_monitor_title">Iona Salgados</string>
+    <string name="notif_monitor_text">Monitorando novos pedidos</string>
+    <string name="notif_novo_pedido_title">Novo pedido #%1$d</string>
+    <string name="notif_pedido_recebido_title">Pedido #%1$d recebido</string>
+    <string name="notif_pedido_recebido_text">%1$s confirmou a entrega</string>
+    <string name="notif_pedido_cancelado_title">Pedido #%1$d cancelado</string>
+</resources>
