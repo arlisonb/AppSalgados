@@ -4,22 +4,20 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.ionasalgados.app.R
 
 @Composable
 fun CoxinhaAnimada(modifier: Modifier = Modifier, size: Dp = 140.dp) {
@@ -27,64 +25,42 @@ fun CoxinhaAnimada(modifier: Modifier = Modifier, size: Dp = 140.dp) {
     val bounce by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(650, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1400
+                0f at 0 using FastOutSlowInEasing
+                1f at 380 using FastOutSlowInEasing
+                0.2f at 520 using FastOutSlowInEasing
+                0f at 1400
+            },
+            repeatMode = RepeatMode.Restart
+        ),
         label = "bounce"
     )
-    val wiggle by transition.animateFloat(
+    val tilt by transition.animateFloat(
         initialValue = -6f,
         targetValue = 6f,
-        animationSpec = infiniteRepeatable(tween(480), RepeatMode.Reverse),
-        label = "wiggle"
+        animationSpec = infiniteRepeatable(tween(720, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "tilt"
     )
-    val steam by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Restart),
-        label = "steam"
+    val glow by transition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "glow"
     )
 
-    Canvas(
+    Image(
+        painter = painterResource(R.mipmap.ic_launcher_foreground),
+        contentDescription = "Coxinha",
         modifier = modifier
             .size(size)
-            .offset(y = (-14 * bounce).dp)
+            .offset(y = (-20 * bounce).dp)
             .graphicsLayer {
-                rotationZ = wiggle
-                scaleX = 1f + 0.06f * bounce
-                scaleY = 1f + 0.06f * bounce
+                rotationZ = tilt
+                val squash = 1f - 0.08f * bounce
+                scaleX = glow * (0.96f + 0.04f * bounce)
+                scaleY = glow * (1.04f - 0.12f * bounce + squash * 0.08f)
             }
-    ) {
-        val w = this.size.width
-        val h = this.size.height
-
-        val body = Path().apply {
-            moveTo(w * 0.5f, h * 0.04f)
-            cubicTo(w * 0.92f, h * 0.32f, w * 0.88f, h * 0.94f, w * 0.5f, h * 0.96f)
-            cubicTo(w * 0.12f, h * 0.94f, w * 0.08f, h * 0.32f, w * 0.5f, h * 0.04f)
-            close()
-        }
-        drawPath(body, color = Color(0xFFE8A317))
-        drawPath(body, color = Color(0xFFB8730A), style = Stroke(width = 4f))
-
-        drawOval(
-            color = Color(0xFFF5DEB3),
-            topLeft = Offset(w * 0.28f, h * 0.7f),
-            size = Size(w * 0.44f, h * 0.16f)
-        )
-
-        drawOval(
-            color = Color(0xFF8B6914).copy(alpha = 0.35f),
-            topLeft = Offset(w * 0.38f, h * 0.45f),
-            size = Size(w * 0.12f, h * 0.08f)
-        )
-        drawOval(
-            color = Color(0xFF8B6914).copy(alpha = 0.25f),
-            topLeft = Offset(w * 0.52f, h * 0.55f),
-            size = Size(w * 0.1f, h * 0.07f)
-        )
-
-        val steamAlpha = 0.4f * (1f - steam)
-        drawLine(Color.White.copy(alpha = steamAlpha), Offset(w * 0.42f, h * 0.08f), Offset(w * 0.38f, h * -0.02f), strokeWidth = 3f)
-        drawLine(Color.White.copy(alpha = steamAlpha * 0.8f), Offset(w * 0.5f, h * 0.05f), Offset(w * 0.5f, h * -0.05f), strokeWidth = 3f)
-        drawLine(Color.White.copy(alpha = steamAlpha * 0.6f), Offset(w * 0.58f, h * 0.08f), Offset(w * 0.62f, h * -0.01f), strokeWidth = 3f)
-    }
+    )
 }

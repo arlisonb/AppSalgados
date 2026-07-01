@@ -456,12 +456,9 @@ class WhatsAppViewModel @Inject constructor(
     }
 
     fun gerarCodigo(telefone: String) {
-        var numero = telefone.replace(Regex("\\D"), "")
-        if (numero.length in 10..11 && !numero.startsWith("55")) {
-            numero = "55$numero"
-        }
-        if (numero.length < 12) {
-            _message.value = "Informe o número com DDI (ex: 5534996677668)"
+        val numero = com.ionasalgados.app.util.PhoneUtils.forWhatsAppApi(telefone)
+        if (numero == null) {
+            _message.value = "Informe DDD + número (ex: 34999667768)"
             return
         }
         viewModelScope.launch {

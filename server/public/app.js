@@ -394,7 +394,7 @@ function updateWhatsAppUI(data) {
 async function loadWhatsApp() {
   const wa = await api('/whatsapp/status');
   updateWhatsAppUI(wa);
-  if (wa.phoneNumber) document.getElementById('wa-telefone').value = wa.phoneNumber;
+  if (wa.phoneNumber) document.getElementById('wa-telefone').value = displayWhatsAppPhone(wa.phoneNumber);
 }
 
 function showWaCode(code) {
@@ -460,9 +460,21 @@ document.getElementById('form-config').onsubmit = async (e) => {
   }
 };
 
+function normalizeWhatsAppPhone(raw) {
+  let tel = String(raw || '').replace(/\D/g, '');
+  if (tel.length >= 10 && tel.length <= 11 && !tel.startsWith('55')) tel = `55${tel}`;
+  return tel;
+}
+
+function displayWhatsAppPhone(raw) {
+  const tel = String(raw || '').replace(/\D/g, '');
+  if (tel.length >= 12 && tel.startsWith('55')) return tel.slice(2);
+  return tel;
+}
+
 document.getElementById('btn-wa-codigo').onclick = async () => {
-  const tel = document.getElementById('wa-telefone').value.replace(/\D/g, '');
-  if (tel.length < 10) return toast('Informe o número com DDI');
+  const tel = normalizeWhatsAppPhone(document.getElementById('wa-telefone').value);
+  if (tel.length < 12) return toast('Informe DDD + número (ex: 34999667768)');
   document.getElementById('wa-msg').textContent = 'Gerando código...';
   try {
     await api('/configuracoes', { method: 'PUT', body: JSON.stringify({ whatsapp: tel }) });

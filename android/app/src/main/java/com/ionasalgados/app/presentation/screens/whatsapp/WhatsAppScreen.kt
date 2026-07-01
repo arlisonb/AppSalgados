@@ -16,15 +16,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ionasalgados.app.presentation.components.*
-import com.ionasalgados.app.presentation.components.CoxinhaAnimada
 import com.ionasalgados.app.presentation.theme.MarromSuave
 import com.ionasalgados.app.presentation.viewmodel.WhatsAppViewModel
+import com.ionasalgados.app.util.PhoneUtils
 import kotlinx.coroutines.launch
 
 @Composable
@@ -40,7 +42,7 @@ fun WhatsAppScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    var telefone by remember(config) { mutableStateOf(config["whatsapp"] ?: "") }
+    var telefone by remember(config) { mutableStateOf(PhoneUtils.forDisplay(config["whatsapp"] ?: "")) }
 
     LaunchedEffect(Unit) { viewModel.load() }
 
@@ -100,15 +102,23 @@ fun WhatsAppScreen(
                     containerColor = Color(0xFFF44336)
                 )
             } else {
+                CoxinhaAnimada(size = 112.dp)
                 IonaSectionTitle("Número para atendimento", modifier = Modifier.fillMaxWidth())
+                Text(
+                    "Só DDD e número — o 55 do Brasil é adicionado automaticamente",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MarromSuave.copy(alpha = 0.65f),
+                    modifier = Modifier.fillMaxWidth()
+                )
                 OutlinedTextField(
-                    value = telefone,
-                    onValueChange = { telefone = it },
-                    label = { Text("Número com DDI") },
-                    placeholder = { Text("5534996677668") },
+                    value = PhoneUtils.formatMasked(telefone),
+                    onValueChange = { telefone = PhoneUtils.formatInput(it) },
+                    label = { Text("DDD + número") },
+                    placeholder = { Text("(34) 99966-7768") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    shape = RoundedCornerShape(14.dp)
+                    shape = RoundedCornerShape(14.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone)
                 )
                 IonaPrimaryButton(
                     text = "Gerar código de conexão",
