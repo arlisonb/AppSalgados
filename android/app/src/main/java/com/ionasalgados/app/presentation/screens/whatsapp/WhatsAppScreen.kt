@@ -35,14 +35,13 @@ fun WhatsAppScreen(
     viewModel: WhatsAppViewModel = hiltViewModel()
 ) {
     val pairingCode by viewModel.pairingCode.collectAsState()
-    val config by viewModel.config.collectAsState()
     val message by viewModel.message.collectAsState()
     val isConnected by viewModel.isConnected.collectAsState()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    var telefone by remember(config) { mutableStateOf(PhoneUtils.forDisplay(config["whatsapp"] ?: "")) }
+    var telefone by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) { viewModel.load() }
 

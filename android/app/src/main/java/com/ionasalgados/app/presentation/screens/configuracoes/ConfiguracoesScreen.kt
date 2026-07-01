@@ -7,14 +7,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.ionasalgados.app.BuildConfig
 import com.ionasalgados.app.presentation.components.*
-import com.ionasalgados.app.presentation.theme.LaranjaIona
-import com.ionasalgados.app.presentation.theme.MarromSuave
 import com.ionasalgados.app.presentation.viewmodel.ConfiguracoesViewModel
 
 @Composable
@@ -23,13 +18,11 @@ fun ConfiguracoesScreen(
     viewModel: ConfiguracoesViewModel = hiltViewModel()
 ) {
     val config by viewModel.config.collectAsState()
-    val serverUrl by viewModel.serverUrl.collectAsState()
     val printerMacSaved by viewModel.printerMac.collectAsState()
     val message by viewModel.message.collectAsState()
-    val discovering by viewModel.discovering.collectAsState()
 
     var nomeEmpresa by remember(config) { mutableStateOf(config["nome_empresa"] ?: "Iona Salgados") }
-    var telefone by remember(config) { mutableStateOf(config["telefone"] ?: "") }
+    var telefone by remember { mutableStateOf("") }
     var endereco by remember(config) { mutableStateOf(config["endereco"] ?: "") }
     var pix by remember(config) { mutableStateOf(config["pix"] ?: "") }
     var impressoraMac by remember(printerMacSaved) { mutableStateOf(printerMacSaved) }
@@ -55,33 +48,7 @@ fun ConfiguracoesScreen(
                 IonaMessageBanner(message)
             }
 
-            IonaSectionTitle("Servidor")
-            IonaSurfaceCard {
-                Text(
-                    if (BuildConfig.USE_PRODUCTION_SERVER) "Servidor de produção (internet)"
-                    else "Detectado automaticamente na rede Wi-Fi",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MarromSuave.copy(alpha = 0.7f)
-                )
-                if (serverUrl.isNotBlank()) {
-                    Text(serverUrl, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MarromSuave)
-                }
-                if (discovering) {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), color = LaranjaIona)
-                    Text(
-                        if (BuildConfig.USE_PRODUCTION_SERVER) "Conectando..." else "Procurando servidor...",
-                        color = MarromSuave.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-            }
-            IonaPrimaryButton(
-                text = if (BuildConfig.USE_PRODUCTION_SERVER) "Reconectar ao servidor" else "Buscar servidor novamente",
-                onClick = { viewModel.buscarServidor() },
-                enabled = !discovering
-            )
-
-            IonaSectionTitle("Empresa", modifier = Modifier.padding(top = 8.dp))
+            IonaSectionTitle("Empresa")
             OutlinedTextField(nomeEmpresa, { nomeEmpresa = it }, label = { Text("Nome") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
             OutlinedTextField(telefone, { telefone = it }, label = { Text("Telefone") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
             OutlinedTextField(endereco, { endereco = it }, label = { Text("Endereço") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))

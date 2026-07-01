@@ -109,10 +109,7 @@ private fun AdicionarProdutoDialog(
                     label = { Text("Categoria") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    placeholder = { Text("Ex: Salgados, Doces...") },
-                    supportingText = if (categorias.isNotEmpty()) {
-                        { Text("Existentes: ${categorias.joinToString(", ") { it.nome }}") }
-                    } else null
+                    placeholder = { Text("Ex: Salgados, Doces...") }
                 )
                 OutlinedTextField(precoUnidade, { precoUnidade = it }, label = { Text("Preço unitário (R$)") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
                 OutlinedTextField(precoCento, { precoCento = it }, label = { Text("Preço cento (R$)") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
