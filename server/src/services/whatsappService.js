@@ -261,6 +261,23 @@ async function waitForPairingCode(timeoutMs) {
   return pairingCode;
 }
 
+async function shutdown() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  initializing = false;
+
+  if (client) {
+    try {
+      await client.close();
+    } catch (_) { }
+    client = null;
+  }
+
+  clearBrowserLock();
+}
+
 async function desconectar() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
@@ -301,6 +318,6 @@ async function enviarLocalizacao(telefone) {
 }
 
 module.exports = {
-  initWhatsApp, getStatus, getClient, reconectar, desconectar,
+  initWhatsApp, getStatus, getClient, reconectar, shutdown, desconectar,
   enviarMensagem, enviarMensagemDireta, enviarLocalizacao
 };

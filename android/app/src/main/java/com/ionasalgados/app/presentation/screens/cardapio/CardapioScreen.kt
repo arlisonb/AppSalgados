@@ -3,8 +3,8 @@ package com.ionasalgados.app.presentation.screens.cardapio
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
@@ -17,10 +17,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ionasalgados.app.domain.model.Produto
+import com.ionasalgados.app.presentation.components.*
 import com.ionasalgados.app.presentation.theme.LaranjaIona
+import com.ionasalgados.app.presentation.theme.MarromSuave
 import com.ionasalgados.app.presentation.viewmodel.CardapioViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CardapioScreen(
     onBack: () -> Unit,
@@ -31,58 +32,43 @@ fun CardapioScreen(
     val message by viewModel.message.collectAsState()
     var showDialog by remember { mutableStateOf(false) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Cardápio", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.refresh() }) {
-                        Icon(Icons.Default.Refresh, "Atualizar", tint = Color.White)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = LaranjaIona, titleContentColor = Color.White)
-            )
+    IonaScaffold(
+        title = "Cardápio",
+        subtitle = "Produtos e preços",
+        onBack = onBack,
+        actions = {
+            IconButton(onClick = { viewModel.refresh() }) {
+                Icon(Icons.Default.Refresh, "Atualizar", tint = Color.White)
+            }
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showDialog = true }, containerColor = LaranjaIona) {
+            FloatingActionButton(
+                onClick = { showDialog = true },
+                containerColor = LaranjaIona,
+                shape = RoundedCornerShape(16.dp)
+            ) {
                 Icon(Icons.Default.Add, "Adicionar", tint = Color.White)
             }
         }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (message.isNotEmpty()) {
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = LaranjaIona.copy(alpha = 0.12f))
+                IonaMessageBanner(message, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            }
+            if (produtos.isEmpty()) {
+                IonaEmptyState("Nenhum produto cadastrado", "Toque no + para adicionar")
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(message, modifier = Modifier.padding(12.dp), color = LaranjaIona)
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
+                    items(produtos, key = { it.id }) { produto ->
+                        ProdutoCard(produto = produto, onDelete = { viewModel.excluirProduto(produto.id) })
+                    }
+                    item { Spacer(modifier = Modifier.height(72.dp)) }
                 }
             }
-        if (produtos.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                    Text("Nenhum produto cadastrado", style = MaterialTheme.typography.titleLarge)
-                    Text("Toque no + para adicionar", color = Color.Gray)
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(produtos, key = { it.id }) { produto ->
-                    ProdutoCard(
-                        produto = produto,
-                        onDelete = { viewModel.excluirProduto(produto.id) }
-                    )
-                }
-            }
-        }
         }
     }
 
@@ -112,34 +98,37 @@ private fun AdicionarProdutoDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Novo Produto", fontWeight = FontWeight.Bold) },
+        shape = IonaCardShape,
+        title = { Text("Novo Produto", fontWeight = FontWeight.Bold, color = MarromSuave) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(nome, { nome = it }, label = { Text("Nome") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(nome, { nome = it }, label = { Text("Nome") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
                 OutlinedTextField(
                     value = categoriaNome,
                     onValueChange = { categoriaNome = it },
                     label = { Text("Categoria") },
                     modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
                     placeholder = { Text("Ex: Salgados, Doces...") },
                     supportingText = if (categorias.isNotEmpty()) {
                         { Text("Existentes: ${categorias.joinToString(", ") { it.nome }}") }
                     } else null
                 )
-                OutlinedTextField(precoUnidade, { precoUnidade = it }, label = { Text("Preço unitário (R$)") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(precoCento, { precoCento = it }, label = { Text("Preço cento — 100 un (R$)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(precoUnidade, { precoUnidade = it }, label = { Text("Preço unitário (R$)") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
+                OutlinedTextField(precoCento, { precoCento = it }, label = { Text("Preço cento (R$)") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp))
             }
         },
         confirmButton = {
-            Button(onClick = {
-                if (nome.isNotBlank() && categoriaNome.isNotBlank()) {
-                    onConfirm(nome, categoriaNome, precoUnidade.toDoubleOrNull() ?: 0.0, precoCento.toDoubleOrNull() ?: 0.0)
-                }
-            }) { Text("Salvar") }
+            Button(
+                onClick = {
+                    if (nome.isNotBlank() && categoriaNome.isNotBlank()) {
+                        onConfirm(nome, categoriaNome, precoUnidade.toDoubleOrNull() ?: 0.0, precoCento.toDoubleOrNull() ?: 0.0)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = LaranjaIona)
+            ) { Text("Salvar") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancelar") }
-        }
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
     )
 }
 
@@ -147,21 +136,21 @@ private fun AdicionarProdutoDialog(
 private fun ProdutoCard(produto: Produto, onDelete: () -> Unit) {
     var showConfirm by remember { mutableStateOf(false) }
 
-    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(2.dp)) {
+    IonaSurfaceCard {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(produto.nome, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(produto.categoriaNome ?: "", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
-                Spacer(modifier = Modifier.height(4.dp))
+                Text(produto.nome, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MarromSuave)
+                Text(produto.categoriaNome ?: "", style = MaterialTheme.typography.bodySmall, color = MarromSuave.copy(alpha = 0.6f))
+                Spacer(modifier = Modifier.height(6.dp))
                 Row {
                     val unidade = if (produto.precoUnidade > 0) produto.precoUnidade
                     else if (produto.precoCento > 0) produto.precoCento / 100 else 0.0
-                    if (unidade > 0) Text("Un: R$ %.2f  ".format(unidade))
-                    if (produto.precoCento > 0) Text("Cento: R$ %.2f".format(produto.precoCento))
+                    if (unidade > 0) Text("Un: R$ %.2f  ".format(unidade), color = MarromSuave)
+                    if (produto.precoCento > 0) Text("Cento: R$ %.2f".format(produto.precoCento), color = LaranjaIona, fontWeight = FontWeight.Medium)
                 }
             }
             IconButton(onClick = { showConfirm = true }) {
@@ -173,16 +162,16 @@ private fun ProdutoCard(produto: Produto, onDelete: () -> Unit) {
     if (showConfirm) {
         AlertDialog(
             onDismissRequest = { showConfirm = false },
+            shape = IonaCardShape,
             title = { Text("Excluir produto?") },
             text = { Text("Remover \"${produto.nome}\" do cardápio?") },
             confirmButton = {
-                Button(onClick = { showConfirm = false; onDelete() }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336))) {
-                    Text("Excluir")
-                }
+                Button(
+                    onClick = { showConfirm = false; onDelete() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336))
+                ) { Text("Excluir") }
             },
-            dismissButton = {
-                TextButton(onClick = { showConfirm = false }) { Text("Cancelar") }
-            }
+            dismissButton = { TextButton(onClick = { showConfirm = false }) { Text("Cancelar") } }
         )
     }
 }

@@ -1,0 +1,24 @@
+[Unit]
+Description=Iona Salgados - API e WhatsApp Bot
+Documentation=https://github.com/arlisonb/AppSalgados
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/iona-salgados/server
+Environment=NODE_ENV=production
+EnvironmentFile=-/opt/iona-salgados/server/.env
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=15
+StartLimitIntervalSec=0
+TimeoutStopSec=30
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=iona-salgados
+
+[Install]
+WantedBy=multi-user.target

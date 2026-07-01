@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,10 +14,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ionasalgados.app.domain.model.Cliente
+import com.ionasalgados.app.presentation.components.*
 import com.ionasalgados.app.presentation.theme.LaranjaIona
+import com.ionasalgados.app.presentation.theme.MarromSuave
 import com.ionasalgados.app.presentation.viewmodel.ClientesViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClientesScreen(
     onBack: () -> Unit,
@@ -34,46 +34,31 @@ fun ClientesScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Clientes", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Voltar")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = LaranjaIona, titleContentColor = Color.White)
-            )
-        },
+    IonaScaffold(
+        title = "Clientes",
+        subtitle = "Cadastro",
+        onBack = onBack
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (message.isNotBlank()) {
-                Text(
-                    message,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    color = if (message.contains("excluído", ignoreCase = true)) Color(0xFF4CAF50) else Color(0xFFF44336),
-                    fontWeight = FontWeight.Medium
+                IonaMessageBanner(
+                    message = message,
+                    success = message.contains("excluído", ignoreCase = true),
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                 )
             }
             if (clientes.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("Nenhum cliente cadastrado")
-                }
+                IonaEmptyState("Nenhum cliente cadastrado", "Clientes aparecem ao fazer pedidos")
             } else {
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    item { Spacer(modifier = Modifier.height(4.dp)) }
                     items(clientes, key = { it.id }) { cliente ->
-                        ClienteCard(
-                            cliente = cliente,
-                            onDelete = { viewModel.excluirCliente(cliente.id) }
-                        )
+                        ClienteCard(cliente = cliente, onDelete = { viewModel.excluirCliente(cliente.id) })
                     }
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
                 }
             }
         }
@@ -85,29 +70,28 @@ private fun ClienteCard(cliente: Cliente, onDelete: () -> Unit) {
     var showConfirm by remember { mutableStateOf(false) }
     val podeExcluir = cliente.pedidosAtivos == 0
 
-    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(2.dp)) {
+    IonaSurfaceCard {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(cliente.nome, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                Text(cliente.telefone, style = MaterialTheme.typography.bodyLarge)
-                cliente.endereco?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Color.Gray) }
-                Spacer(modifier = Modifier.height(4.dp))
+                Text(cliente.nome, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = MarromSuave)
+                Text(cliente.telefone, style = MaterialTheme.typography.bodyLarge, color = MarromSuave.copy(alpha = 0.8f))
+                cliente.endereco?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MarromSuave.copy(alpha = 0.55f))
+                }
+                Spacer(modifier = Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text("${cliente.qtdPedidos} pedidos", style = MaterialTheme.typography.bodySmall)
-                    Text("R$ %.2f".format(cliente.valorTotal), style = MaterialTheme.typography.bodySmall, color = LaranjaIona)
+                    Text("${cliente.qtdPedidos} pedidos", style = MaterialTheme.typography.bodySmall, color = MarromSuave.copy(alpha = 0.6f))
+                    Text("R$ %.2f".format(cliente.valorTotal), style = MaterialTheme.typography.bodySmall, color = LaranjaIona, fontWeight = FontWeight.Medium)
                 }
             }
-            IconButton(
-                onClick = { showConfirm = true },
-                enabled = podeExcluir
-            ) {
+            IconButton(onClick = { showConfirm = true }, enabled = podeExcluir) {
                 Icon(
                     Icons.Default.Delete,
                     contentDescription = if (podeExcluir) "Excluir" else "Possui pedidos em andamento",
-                    tint = if (podeExcluir) Color(0xFFF44336) else Color.Gray
+                    tint = if (podeExcluir) Color(0xFFF44336) else MarromSuave.copy(alpha = 0.3f)
                 )
             }
         }
@@ -116,6 +100,7 @@ private fun ClienteCard(cliente: Cliente, onDelete: () -> Unit) {
     if (showConfirm) {
         AlertDialog(
             onDismissRequest = { showConfirm = false },
+            shape = IonaCardShape,
             title = { Text("Excluir cliente?") },
             text = {
                 Text(
@@ -128,18 +113,11 @@ private fun ClienteCard(cliente: Cliente, onDelete: () -> Unit) {
             },
             confirmButton = {
                 Button(
-                    onClick = {
-                        showConfirm = false
-                        onDelete()
-                    },
+                    onClick = { showConfirm = false; onDelete() },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336))
-                ) {
-                    Text("Excluir")
-                }
+                ) { Text("Excluir") }
             },
-            dismissButton = {
-                TextButton(onClick = { showConfirm = false }) { Text("Cancelar") }
-            }
+            dismissButton = { TextButton(onClick = { showConfirm = false }) { Text("Cancelar") } }
         )
     }
 }

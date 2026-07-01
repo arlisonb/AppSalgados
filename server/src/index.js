@@ -11,7 +11,7 @@ const apiRoutes = require('./routes/api');
 const whatsappService = require('./services/whatsappService');
 const pushService = require('./services/pushService');
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 const SERVE_WEB = process.env.SERVE_WEB !== 'false';
 const PUBLIC_URL = process.env.PUBLIC_URL || '';
@@ -98,6 +98,28 @@ async function start() {
     process.exit(1);
   }
 }
+
+let shuttingDown = false;
+
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Encerrando servidor (${signal})...`);
+
+  try {
+    await whatsappService.shutdown();
+  } catch (_) { }
+
+  await new Promise((resolve) => {
+    server.close(() => resolve());
+    setTimeout(resolve, 5000);
+  });
+
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 start();
 
