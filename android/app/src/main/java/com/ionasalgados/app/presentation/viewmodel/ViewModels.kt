@@ -320,6 +320,26 @@ class CardapioViewModel @Inject constructor(
                 .onFailure { _message.value = "Erro ao excluir produto" }
         }
     }
+
+    fun editarProduto(id: Long, nome: String, categoriaNome: String, precoUnidade: Double, precoCento: Double, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            _message.value = "Salvando..."
+            if (!produtoRepository.ensureServerConnection()) {
+                _message.value = "Servidor offline. Vá em Configurações → Buscar servidor."
+                onResult(false)
+                return@launch
+            }
+            produtoRepository.updateProduto(id, nome, categoriaNome, precoUnidade, precoCento)
+                .onSuccess {
+                    _message.value = "Produto atualizado!"
+                    onResult(true)
+                }
+                .onFailure {
+                    _message.value = "Erro ao atualizar produto."
+                    onResult(false)
+                }
+        }
+    }
 }
 
 @HiltViewModel

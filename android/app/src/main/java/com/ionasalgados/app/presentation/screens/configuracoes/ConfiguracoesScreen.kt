@@ -6,7 +6,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ionasalgados.app.presentation.components.*
@@ -22,9 +24,10 @@ fun ConfiguracoesScreen(
     val message by viewModel.message.collectAsState()
 
     var nomeEmpresa by remember(config) { mutableStateOf(config["nome_empresa"] ?: "Iona Salgados") }
-    var telefone by remember { mutableStateOf("") }
+    var telefone by remember(config) { mutableStateOf(config["telefone"] ?: "") }
     var endereco by remember(config) { mutableStateOf(config["endereco"] ?: "") }
     var pix by remember(config) { mutableStateOf(config["pix"] ?: "") }
+    var frete by remember(config) { mutableStateOf(config["taxa_entrega"] ?: "0") }
     var impressoraMac by remember(printerMacSaved) { mutableStateOf(printerMacSaved) }
 
     LaunchedEffect(Unit) { viewModel.load() }
@@ -53,6 +56,16 @@ fun ConfiguracoesScreen(
             OutlinedTextField(telefone, { telefone = it }, label = { Text("Telefone") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
             OutlinedTextField(endereco, { endereco = it }, label = { Text("Endereço") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
             OutlinedTextField(pix, { pix = it }, label = { Text("Chave PIX") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
+            OutlinedTextField(
+                value = frete,
+                onValueChange = { frete = it.filter { c -> c.isDigit() || c == ',' || c == '.' } },
+                label = { Text("Frete (R$)") },
+                placeholder = { Text("0,00") },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(14.dp),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                supportingText = { Text("Somado automaticamente ao total dos pedidos") }
+            )
 
             IonaSectionTitle("Impressora Bluetooth", modifier = Modifier.padding(top = 8.dp))
             OutlinedTextField(impressoraMac, { impressoraMac = it }, label = { Text("Endereço MAC") }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp))
@@ -70,7 +83,8 @@ fun ConfiguracoesScreen(
                         "nome_empresa" to nomeEmpresa,
                         "telefone" to telefone,
                         "endereco" to endereco,
-                        "pix" to pix
+                        "pix" to pix,
+                        "taxa_entrega" to frete.replace(',', '.')
                     ))
                 }
             )

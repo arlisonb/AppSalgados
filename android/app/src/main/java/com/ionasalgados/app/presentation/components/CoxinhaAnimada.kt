@@ -8,15 +8,23 @@ import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.MaterialTheme
 import com.ionasalgados.app.R
 
 @Composable
@@ -50,17 +58,28 @@ fun CoxinhaAnimada(modifier: Modifier = Modifier, size: Dp = 140.dp) {
         label = "glow"
     )
 
-    Image(
-        painter = painterResource(R.mipmap.ic_launcher_foreground),
-        contentDescription = "Coxinha",
+    val fundo = MaterialTheme.colorScheme.background
+
+    Box(
         modifier = modifier
             .size(size)
-            .offset(y = (-20 * bounce).dp)
-            .graphicsLayer {
-                rotationZ = tilt
-                val squash = 1f - 0.08f * bounce
-                scaleX = glow * (0.96f + 0.04f * bounce)
-                scaleY = glow * (1.04f - 0.12f * bounce + squash * 0.08f)
-            }
-    )
+            .background(fundo),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            painter = painterResource(R.mipmap.ic_launcher_foreground),
+            contentDescription = "Coxinha",
+            contentScale = ContentScale.Fit,
+            colorFilter = ColorFilter.tint(fundo, BlendMode.Multiply),
+            modifier = Modifier
+                .fillMaxSize(0.92f)
+                .offset(y = (-20 * bounce).dp)
+                .graphicsLayer {
+                    rotationZ = tilt
+                    val squash = 1f - 0.08f * bounce
+                    scaleX = glow * (0.96f + 0.04f * bounce)
+                    scaleY = glow * (1.04f - 0.12f * bounce + squash * 0.08f)
+                }
+        )
+    }
 }

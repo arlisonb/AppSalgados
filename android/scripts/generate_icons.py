@@ -23,18 +23,27 @@ FOREGROUND_SIZES = {
 }
 
 
-def square_image(img: Image.Image, size: int, padding_ratio: float = 0.08) -> Image.Image:
+def square_image(img: Image.Image, size: int, padding_ratio: float = 0.08, background=(255, 255, 255, 255)) -> Image.Image:
     img = img.convert("RGBA")
     w, h = img.size
     side = max(w, h)
-    canvas = Image.new("RGBA", (side, side), (255, 255, 255, 255))
+    canvas = Image.new("RGBA", (side, side), background)
     canvas.paste(img, ((side - w) // 2, (side - h) // 2), img if img.mode == "RGBA" else None)
     inner = int(size * (1 - padding_ratio * 2))
     canvas = canvas.resize((inner, inner), Image.Resampling.LANCZOS)
-    out = Image.new("RGBA", (size, size), (255, 255, 255, 255))
+    out = Image.new("RGBA", (size, size), background)
     offset = (size - inner) // 2
     out.paste(canvas, (offset, offset), canvas)
     return out
+
+
+COXINHA_DRAWABLE_SIZES = {
+    "drawable-mdpi": 120,
+    "drawable-hdpi": 180,
+    "drawable-xhdpi": 240,
+    "drawable-xxhdpi": 360,
+    "drawable-xxxhdpi": 480,
+}
 
 
 def main():
@@ -57,6 +66,13 @@ def main():
         fg = square_image(source, size, padding_ratio=0.12)
         fg.save(out_dir / "ic_launcher_foreground.png", "PNG")
         print(f"OK {folder}/ic_launcher_foreground.png ({size}px)")
+
+    for folder, size in COXINHA_DRAWABLE_SIZES.items():
+        out_dir = RES / folder
+        out_dir.mkdir(parents=True, exist_ok=True)
+        coxinha = square_image(source, size, padding_ratio=0.06, background=(0, 0, 0, 0))
+        coxinha.save(out_dir / "coxinha.png", "PNG")
+        print(f"OK {folder}/coxinha.png ({size}px)")
 
 
 if __name__ == "__main__":

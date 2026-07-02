@@ -3,9 +3,6 @@ package com.ionasalgados.app.presentation.screens.dashboard
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -153,36 +150,56 @@ private fun DashboardGrid(
         DashboardCard("Clientes", dashboard.clientesAtendidos.toString(), Icons.Default.People),
     )
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(2),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.height(340.dp)
-    ) {
-        items(cards) { card ->
-            val selecionado = card.clicavel && pedidosHojeSelecionado
-            val border = if (selecionado) androidx.compose.foundation.BorderStroke(2.dp, LaranjaIona) else null
-
-            if (card.clicavel) {
-                Card(
-                    onClick = onPedidosHojeClick,
-                    modifier = Modifier.fillMaxWidth().height(108.dp),
-                    shape = IonaCardShape,
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (selecionado) LaranjaIona.copy(alpha = 0.12f) else Color.White
-                    ),
-                    elevation = CardDefaults.cardElevation(if (selecionado) 6.dp else 2.dp),
-                    border = border
-                ) { DashboardCardContent(card) }
-            } else {
-                Card(
-                    modifier = Modifier.fillMaxWidth().height(108.dp),
-                    shape = IonaCardShape,
-                    colors = CardDefaults.cardColors(containerColor = Color.White),
-                    elevation = CardDefaults.cardElevation(2.dp)
-                ) { DashboardCardContent(card) }
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        cards.chunked(2).forEach { rowCards ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                rowCards.forEach { card ->
+                    Box(modifier = Modifier.weight(1f)) {
+                        DashboardCardItem(
+                            card = card,
+                            pedidosHojeSelecionado = pedidosHojeSelecionado,
+                            onPedidosHojeClick = onPedidosHojeClick
+                        )
+                    }
+                }
+                if (rowCards.size == 1) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun DashboardCardItem(
+    card: DashboardCard,
+    pedidosHojeSelecionado: Boolean,
+    onPedidosHojeClick: () -> Unit
+) {
+    val selecionado = card.clicavel && pedidosHojeSelecionado
+    val border = if (selecionado) androidx.compose.foundation.BorderStroke(2.dp, LaranjaIona) else null
+
+    if (card.clicavel) {
+        Card(
+            onClick = onPedidosHojeClick,
+            modifier = Modifier.fillMaxWidth().height(108.dp),
+            shape = IonaCardShape,
+            colors = CardDefaults.cardColors(
+                containerColor = if (selecionado) LaranjaIona.copy(alpha = 0.12f) else Color.White
+            ),
+            elevation = CardDefaults.cardElevation(if (selecionado) 6.dp else 2.dp),
+            border = border
+        ) { DashboardCardContent(card) }
+    } else {
+        Card(
+            modifier = Modifier.fillMaxWidth().height(108.dp),
+            shape = IonaCardShape,
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(2.dp)
+        ) { DashboardCardContent(card) }
     }
 }
 

@@ -192,6 +192,32 @@ class ProdutoRepository @Inject constructor(
         Result.failure(e)
     }
 
+    suspend fun updateProduto(
+        id: Long,
+        nome: String,
+        categoriaNome: String,
+        precoUnidade: Double,
+        precoCento: Double
+    ): Result<Produto> = try {
+        val dto = ProdutoDto(
+            nome = nome.trim(),
+            categoriaId = 0,
+            categoriaNome = categoriaNome.trim(),
+            precoUnidade = precoUnidade,
+            precoCento = precoCento,
+            ativo = true
+        )
+        val response = apiProvider.getApi().updateProduto(id, dto)
+        if (response.isSuccessful) {
+            refresh()
+            val produto = response.body()?.toDomain()
+            if (produto != null) Result.success(produto)
+            else Result.failure(Exception("Resposta vazia"))
+        } else Result.failure(Exception("Erro ${response.code()}: ${response.errorBody()?.string()}"))
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
     private fun com.ionasalgados.app.data.local.entity.ProdutoEntity.toDomain() = Produto(
         id, nome, categoriaId, categoriaNome, descricao, imagem,
         precoUnidade, precoCento, precoCentoCinquenta, precoDuzentos,

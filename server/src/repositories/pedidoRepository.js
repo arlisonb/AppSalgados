@@ -1,4 +1,5 @@
 const { getDb } = require('../database/db');
+const configRepo = require('./configRepository');
 
 const STATUS_VALIDOS = [
   'novo', 'confirmado', 'preparando', 'pronto',
@@ -59,6 +60,14 @@ function findById(id) {
 
 function create(data) {
   const db = getDb();
+  const valorItens = data.valor_itens || 0;
+  const taxaEntrega = (data.taxa_entrega != null && data.taxa_entrega !== undefined)
+    ? Number(data.taxa_entrega)
+    : parseFloat(configRepo.getConfig('taxa_entrega') || '0');
+  const valorTotal = (data.valor_total != null && data.valor_total !== undefined)
+    ? data.valor_total
+    : valorItens + taxaEntrega;
+
   const transaction = db.transaction(() => {
     const numero = getProximoNumero();
     const result = db.prepare(`
@@ -69,8 +78,8 @@ function create(data) {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       numero, data.cliente_id, data.status || 'novo',
-      data.valor_itens || 0, data.taxa_entrega || 0,
-      data.valor_total || 0, data.forma_pagamento || null,
+      valorItens, taxaEntrega,
+      valorTotal, data.forma_pagamento || null,
       data.troco || 0, data.observacoes || null,
       data.endereco || null, data.origem || 'app',
       data.tempo_estimado || null,
