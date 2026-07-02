@@ -91,7 +91,7 @@ async function start() {
     });
 
     whatsappService.initWhatsApp(io).catch((err) => {
-      console.warn('WhatsApp: configure WHATSAPP_PHONE no .env e use código de pareamento:', err.message);
+      console.warn('WhatsApp: configure o número no app e use o código de pareamento:', err.message);
     });
   } catch (err) {
     console.error('Erro ao iniciar servidor:', err);

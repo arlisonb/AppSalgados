@@ -25,7 +25,6 @@ function normalizePhone(phone) {
 
 function getPhoneNumber() {
   return normalizePhone(
-    process.env.WHATSAPP_PHONE ||
     configRepo.getConfig('whatsapp') ||
     configRepo.getConfig('telefone') ||
     ''
@@ -87,7 +86,7 @@ async function initWhatsApp(socketIo) {
 
   if (!phoneNumber) {
     status = 'sem_telefone';
-    console.warn('Configure WHATSAPP_PHONE no .env ou telefone nas configurações');
+    console.warn('Configure o número do WhatsApp no app (tela WhatsApp ou Configurações)');
     if (io) io.emit('statusWhatsApp', { status, message: 'Configure o número do WhatsApp' });
     return null;
   }
@@ -207,7 +206,6 @@ function getClient() {
 async function reconectar(telefone) {
   if (telefone) {
     const clean = normalizePhone(telefone);
-    process.env.WHATSAPP_PHONE = clean;
     configRepo.setConfig('whatsapp', clean);
   }
 
