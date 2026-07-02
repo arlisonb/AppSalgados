@@ -152,7 +152,7 @@ async function initWhatsApp(socketIo) {
         whatsappBot.init(client, io);
         attachMessageHandler();
       }
-      if (['CONFLICT', 'UNPAIRED', 'UNLAUNCHED'].includes(state)) {
+      if (state === 'CONFLICT') {
         scheduleReconnect();
       }
     });
