@@ -119,7 +119,7 @@ async function initWhatsApp(socketIo) {
       phoneNumber,
       headless: true,
       devtools: false,
-      useChrome: true,
+      useChrome: false,
       debug: false,
       logQR: false,
       waitForLogin: false,
