@@ -1,6 +1,7 @@
 const wppconnect = require('@wppconnect-team/wppconnect');
 const path = require('path');
 const fs = require('fs');
+const { execSync } = require('child_process');
 const whatsappBot = require('./whatsappBot');
 const configRepo = require('../repositories/configRepository');
 const { isMensagemAtendimento } = require('../utils/whatsappChat');
@@ -31,8 +32,25 @@ function getPhoneNumber() {
   );
 }
 
+function killStaleBrowser(sessionDir) {
+  try {
+    if (process.platform === 'win32') {
+      const escaped = sessionDir.replace(/\\/g, '\\\\');
+      execSync(
+        `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*${escaped}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"`,
+        { stdio: 'ignore', timeout: 8000 }
+      );
+    } else {
+      execSync(`pkill -9 -f "${sessionDir}"`, { stdio: 'ignore', timeout: 8000 });
+    }
+  } catch (_) { /* nenhum processo órfão para encerrar */ }
+}
+
 function clearBrowserLock() {
   const sessionDir = path.join(TOKENS_PATH, SESSION_NAME);
+
+  killStaleBrowser(sessionDir);
+
   ['SingletonLock', 'SingletonCookie', 'SingletonSocket'].forEach((file) => {
     try {
       const filePath = path.join(sessionDir, file);
@@ -90,6 +108,8 @@ async function initWhatsApp(socketIo) {
     if (io) io.emit('statusWhatsApp', { status, message: 'Configure o número do WhatsApp' });
     return null;
   }
+
+  clearBrowserLock();
 
   try {
     client = await wppconnect.create({
