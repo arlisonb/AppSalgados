@@ -12,6 +12,7 @@ let status = 'desconectado';
 let pairingCode = null;
 let reconnectTimer = null;
 let initializing = false;
+let initializingSince = 0;
 
 const SESSION_NAME = process.env.SESSION_NAME || 'iona-salgados';
 const TOKENS_PATH = path.join(__dirname, '../../tokens');
@@ -59,8 +60,44 @@ function clearBrowserLock() {
   });
 }
 
+// Remove toda a sessão salva (tokens + perfil do navegador) para forçar
+// um pareamento novo. Usado ao desconectar ou trocar de número.
+function removeSessionData() {
+  const sessionDir = path.join(TOKENS_PATH, SESSION_NAME);
+  killStaleBrowser(sessionDir);
+  try {
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
+  } catch (err) {
+    console.error('Erro ao limpar sessão:', err.message);
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Impede que qualquer promessa (close/logout/create) trave o fluxo pra sempre.
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`timeout: ${label}`)), ms)
+    )
+  ]);
+}
+
+// Fecha o cliente atual sem nunca travar. clearBrowserLock() em seguida
+// garante que o processo do navegador realmente morra.
+async function closeClientSafe(useLogout) {
+  if (!client) return;
+  const c = client;
+  client = null;
+  if (useLogout) {
+    try { await withTimeout(c.logout(), 10000, 'logout'); } catch (_) { }
+  }
+  try { await withTimeout(c.close(), 8000, 'close'); } catch (_) { }
 }
 
 function attachMessageHandler() {
@@ -224,8 +261,12 @@ function getClient() {
 }
 
 async function reconectar(telefone) {
+  const numeroAntigo = getPhoneNumber();
+  let numeroMudou = false;
+
   if (telefone) {
     const clean = normalizePhone(telefone);
+    numeroMudou = clean !== numeroAntigo;
     configRepo.setConfig('whatsapp', clean);
   }
 
@@ -235,25 +276,43 @@ async function reconectar(telefone) {
     return getStatus();
   }
 
+  // Se uma inicialização anterior ficou presa por muito tempo, libera a trava.
+  if (initializing && Date.now() - initializingSince > 90000) {
+    console.warn('Inicialização anterior travada — forçando nova tentativa');
+    initializing = false;
+  }
+
   if (initializing) {
     await waitForPairingCode(30000);
     return getStatus();
   }
 
   initializing = true;
+  initializingSince = Date.now();
   pairingCode = null;
   status = 'reconectando';
 
-  if (client) {
-    try { await client.close(); } catch (_) { }
-    client = null;
+  // Encerra qualquer navegador da sessão atual.
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  await closeClientSafe(false);
+
+  // Trocar de número exige apagar a sessão antiga, senão o WppConnect
+  // reconecta no número anterior em vez de pedir código pro novo.
+  if (numeroMudou) {
+    console.log('Número alterado — limpando sessão para novo pareamento');
+    removeSessionData();
+  } else {
+    clearBrowserLock();
   }
 
-  clearBrowserLock();
   await sleep(2000);
 
   try {
-    await initWhatsApp(io);
+    // initWhatsApp não pode travar o ciclo indefinidamente.
+    await withTimeout(initWhatsApp(io), 60000, 'initWhatsApp');
     await waitForPairingCode(45000);
   } catch (err) {
     if (pairingCode) {
@@ -261,6 +320,7 @@ async function reconectar(telefone) {
     } else {
       console.error('Erro ao reconectar:', err.message);
       status = 'erro';
+      clearBrowserLock();
     }
   } finally {
     initializing = false;
@@ -286,13 +346,7 @@ async function shutdown() {
   }
   initializing = false;
 
-  if (client) {
-    try {
-      await client.close();
-    } catch (_) { }
-    client = null;
-  }
-
+  await closeClientSafe(false);
   clearBrowserLock();
 }
 
@@ -304,16 +358,11 @@ async function desconectar() {
   initializing = false;
   pairingCode = null;
 
-  if (client) {
-    try {
-      await client.logout();
-    } catch (_) {
-      try { await client.close(); } catch (_) { }
-    }
-    client = null;
-  }
+  // logout invalida a sessão no WhatsApp; em seguida apagamos os dados locais
+  // para que reconectar (mesmo número ou outro) faça sempre um pareamento novo.
+  await closeClientSafe(true);
+  removeSessionData();
 
-  clearBrowserLock();
   status = 'desconectado';
   if (io) io.emit('statusWhatsApp', { status: 'desconectado', pairingCode: null });
   console.log('WhatsApp desconectado');
