@@ -584,7 +584,7 @@ async function handleConfirmar(tel, opcao, dados, chatId) {
       const copiaECola = gerarPixCopiaECola({
         chave: chavePix,
         nome: configRepo.getConfig('nome_empresa') || 'Iona Salgados',
-        cidade: configRepo.getConfig('cidade') || 'BRASIL',
+        cidade: configRepo.getConfig('cidade') || 'Uberlandia',
         valor: resumo.valor_total,
         txid: `IONA${pedido.numero}`
       });
