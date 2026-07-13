@@ -192,8 +192,13 @@ async function initWhatsApp(socketIo) {
           return;
         }
 
-        if (statusSession === 'notLogged') {
-          status = pairingCode ? 'aguardando_codigo' : 'notLogged';
+        // Enquanto houver um código pendente, manter o status estável em
+        // 'aguardando_codigo'. Estados intermediários (notLogged,
+        // desconnectedMobile, etc.) fariam o app piscar "desconectado".
+        if (pairingCode) {
+          status = 'aguardando_codigo';
+        } else if (statusSession === 'notLogged') {
+          status = 'notLogged';
         } else if (statusSession !== 'autocloseCalled') {
           status = statusSession;
         }
