@@ -12,6 +12,34 @@ function sanitize(text, max) {
     .substring(0, max);
 }
 
+// Ajusta a chave PIX para o formato exigido pelo Banco Central conforme o tipo.
+// Telefone precisa de +55DDDNUMERO; e-mail em minúsculas; chave aleatória e
+// CPF/CNPJ ficam como estão (apenas dígitos no caso de documento).
+function normalizarChavePix(chave) {
+  const raw = String(chave || '').trim();
+  if (!raw) return '';
+
+  // E-mail
+  if (raw.includes('@')) return raw.toLowerCase();
+
+  // Chave aleatória (UUID sempre contém letras hexadecimais)
+  if (/[a-zA-Z]/.test(raw)) return raw;
+
+  const digits = raw.replace(/\D/g, '');
+
+  // Telefone já com código do país (55 + DDD + número)
+  if ((digits.length === 12 || digits.length === 13) && digits.startsWith('55')) {
+    return `+${digits}`;
+  }
+  // Celular brasileiro: DDD (2) + 9 + 8 dígitos = 11, com o 9 na 3ª posição
+  if (digits.length === 11 && digits[2] === '9') return `+55${digits}`;
+  // Fixo brasileiro: DDD (2) + 8 dígitos = 10
+  if (digits.length === 10) return `+55${digits}`;
+
+  // CPF (11) ou CNPJ (14): apenas dígitos
+  return digits;
+}
+
 // Campo no formato EMV: ID (2) + tamanho (2) + valor.
 function emv(id, value) {
   const len = String(value.length).padStart(2, '0');
@@ -32,7 +60,7 @@ function crc16(payload) {
 }
 
 function gerarPixCopiaECola({ chave, nome, cidade, valor, txid }) {
-  const chaveTrim = String(chave || '').trim();
+  const chaveTrim = normalizarChavePix(chave);
   if (!chaveTrim) return null;
 
   const nomeSan = sanitize(nome, 25) || 'RECEBEDOR';
