@@ -6,6 +6,7 @@ const pedidoRepo = require('../repositories/pedidoRepository');
 const configRepo = require('../repositories/configRepository');
 const { parseQuantidadeNatural, parseMultiplosItens, matchProdutoCatalogo } = require('../utils/nlpParser');
 const { isChatIdValido } = require('../utils/whatsappChat');
+const { gerarPixCopiaECola } = require('../utils/pix');
 
 let whatsappClient = null;
 let io = null;
@@ -575,39 +576,69 @@ async function enviarResumo(tel, dados, chatId) {
 
 async function handleConfirmar(tel, opcao, dados, chatId) {
   if (opcao === '1') {
-    const resumo = calcularResumo(dados.carrinho || [], dados);
-
-    const pedido = pedidoRepo.create({
-      cliente_id: dados.cliente_id,
-      status: 'novo',
-      valor_itens: resumo.valor_itens,
-      taxa_entrega: resumo.taxa_entrega,
-      valor_total: resumo.valor_total,
-      endereco: dados.endereco,
-      origem: 'whatsapp',
-      whatsapp_chat_id: dados.chat_id || chatId,
-      itens: resumo.itens
-    });
-
-    clienteRepo.atualizarEstatisticas(dados.cliente_id, resumo.valor_total);
-
+    const chavePix = (configRepo.getConfig('pix') || '').trim();
+    const { pedido, resumo } = await criarPedido(tel, dados, chatId, chavePix ? 'pix' : null);
     const msgFinal = configRepo.getConfig('mensagem_final') || 'Obrigado pela preferência!';
-    await enviarMensagem(tel, `✅ *Pedido #${pedido.numero} recebido!*\n\nSeu pedido já foi enviado para produção.\n\n${msgFinal}`, chatId);
+
+    if (chavePix) {
+      const copiaECola = gerarPixCopiaECola({
+        chave: chavePix,
+        nome: configRepo.getConfig('nome_empresa') || 'Iona Salgados',
+        cidade: configRepo.getConfig('cidade') || 'BRASIL',
+        valor: resumo.valor_total,
+        txid: `IONA${pedido.numero}`
+      });
+
+      await enviarMensagem(
+        tel,
+        `✅ *Pedido #${pedido.numero} recebido e enviado para produção!*\n\n💠 *Pagamento via PIX — ${fmtMoeda(resumo.valor_total)}*\n\nCopie o código abaixo e pague no app do seu banco (opção *PIX Copia e Cola*):`,
+        chatId
+      );
+      await enviarMensagem(tel, copiaECola, chatId);
+      await enviarMensagem(tel, `Depois de pagar, é só aguardar. 🥟\n\n${msgFinal}`, chatId);
+    } else {
+      await enviarMensagem(
+        tel,
+        `✅ *Pedido #${pedido.numero} recebido!*\n\nSeu pedido já foi enviado para produção.\n\n${msgFinal}`,
+        chatId
+      );
+    }
 
     setSessao(tel, ESTADOS.ESCOLHENDO_ITENS, { chat_id: dados.chat_id, carrinho: [] }, chatId);
-
-    if (io) {
-      io.emit('novoPedido', pedido);
-      io.emit('imprimirPedido', pedido);
-      pushService.notifyNovoPedido(pedido);
-      console.log(`Pedido #${pedido.numero} criado via WhatsApp — ${pedido.itens?.length || 0} itens`);
-    }
   } else if (opcao === '2') {
     setSessao(tel, ESTADOS.ESCOLHENDO_ITENS, { chat_id: dados.chat_id, carrinho: [] }, chatId);
     await enviarMensagem(tel, 'Pedido cancelado. Digite *OI* para fazer um novo pedido.', chatId);
   } else {
     await enviarMensagem(tel, `Digite *${emojiNumero(1)}* para confirmar ou *${emojiNumero(2)}* para cancelar.`, chatId);
   }
+}
+
+async function criarPedido(tel, dados, chatId, formaPagamento) {
+  const resumo = calcularResumo(dados.carrinho || [], dados);
+
+  const pedido = pedidoRepo.create({
+    cliente_id: dados.cliente_id,
+    status: 'novo',
+    valor_itens: resumo.valor_itens,
+    taxa_entrega: resumo.taxa_entrega,
+    valor_total: resumo.valor_total,
+    forma_pagamento: formaPagamento,
+    endereco: dados.endereco,
+    origem: 'whatsapp',
+    whatsapp_chat_id: dados.chat_id || chatId,
+    itens: resumo.itens
+  });
+
+  clienteRepo.atualizarEstatisticas(dados.cliente_id, resumo.valor_total);
+
+  if (io) {
+    io.emit('novoPedido', pedido);
+    io.emit('imprimirPedido', pedido);
+    pushService.notifyNovoPedido(pedido);
+    console.log(`Pedido #${pedido.numero} criado via WhatsApp — ${pedido.itens?.length || 0} itens (${formaPagamento})`);
+  }
+
+  return { pedido, resumo };
 }
 
 function iniciarConfirmacaoEntrega(telefone, pedido, chatId, socketIo) {
