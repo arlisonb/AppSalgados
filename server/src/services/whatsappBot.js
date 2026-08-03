@@ -5,7 +5,7 @@ const clienteRepo = require('../repositories/clienteRepository');
 const pedidoRepo = require('../repositories/pedidoRepository');
 const configRepo = require('../repositories/configRepository');
 const { parseQuantidadeNatural, parseMultiplosItens, matchProdutoCatalogo } = require('../utils/nlpParser');
-const { isChatIdValido } = require('../utils/whatsappChat');
+const { isChatIdValido, normalizeChatId } = require('../utils/whatsappChat');
 const { gerarPixCopiaECola } = require('../utils/pix');
 
 let whatsappClient = null;
@@ -36,7 +36,8 @@ function normalizePhoneKey(telefone) {
 }
 
 function resolveSessionKey(telefone, chatId) {
-  if (chatId && isChatIdValido(chatId)) return chatId;
+  const normalizedChatId = normalizeChatId(chatId);
+  if (normalizedChatId && isChatIdValido(normalizedChatId)) return normalizedChatId;
   const clean = normalizePhoneKey(telefone);
   return clean ? `${clean}@c.us` : null;
 }
@@ -113,7 +114,10 @@ function salvarMensagem(telefone, direcao, conteudo, clienteId = null) {
 }
 
 function getChatId(telefone, dados = {}) {
-  return dados.chat_id || `${telefone.replace(/\D/g, '')}@c.us`;
+  const fromDados = normalizeChatId(dados.chat_id);
+  if (fromDados && isChatIdValido(fromDados)) return fromDados;
+  const clean = String(telefone || '').replace(/\D/g, '');
+  return clean ? `${clean}@c.us` : fromDados;
 }
 
 async function enviarMensagem(telefone, texto, chatId = null) {
@@ -122,7 +126,7 @@ async function enviarMensagem(telefone, texto, chatId = null) {
     return;
   }
   const sessao = getSessao(telefone, chatId);
-  const to = chatId || getChatId(telefone, sessao.dados);
+  const to = normalizeChatId(chatId || getChatId(telefone, sessao.dados));
   if (!isChatIdValido(to)) {
     console.warn('ChatId inválido, mensagem não enviada:', to);
     return;
@@ -385,13 +389,14 @@ async function iniciarCardapio(tel, dados, chatId, opts = {}) {
 }
 
 async function processarMensagem(telefone, mensagem, chatId) {
-  const tel = telefone.replace(/\D/g, '');
-  const sessao = getSessao(telefone, chatId);
-  const dados = { ...sessao.dados, chat_id: chatId || sessao.dados.chat_id };
+  const tel = String(telefone || '').replace(/\D/g, '');
+  const chatIdNorm = normalizeChatId(chatId);
+  const sessao = getSessao(telefone, chatIdNorm);
+  const dados = { ...sessao.dados, chat_id: chatIdNorm || sessao.dados.chat_id };
   const texto = mensagem.trim();
   const textoLower = texto.toLowerCase();
 
-  salvarMensagem(tel, 'entrada', mensagem, dados.cliente_id);
+  salvarMensagem(tel || chatIdNorm, 'entrada', mensagem, dados.cliente_id);
 
   if (/^(ola|oi|olá|hey|menu|cardapio|cardápio|inicio|início|bom dia|boa tarde|boa noite)$/i.test(textoLower)) {
     const emFluxo = [
@@ -403,35 +408,35 @@ async function processarMensagem(telefone, mensagem, chatId) {
       ESTADOS.PEDIDO_TELEFONE
     ].includes(sessao.estado);
     if (!emFluxo) {
-      await iniciarAtendimento(tel, dados, chatId);
+      await iniciarAtendimento(tel, dados, chatIdNorm);
       return;
     }
   }
 
   switch (sessao.estado) {
     case ESTADOS.ESCOLHENDO_ITENS:
-      await handleEscolhendoItens(tel, texto, textoLower, { ...sessao, dados }, chatId);
+      await handleEscolhendoItens(tel, texto, textoLower, { ...sessao, dados }, chatIdNorm);
       break;
     case ESTADOS.CONFIRMAR_DADOS:
-      await handleConfirmarDados(tel, texto, dados, chatId);
+      await handleConfirmarDados(tel, texto, dados, chatIdNorm);
       break;
     case ESTADOS.PEDIDO_NOME:
-      await handlePedidoNome(tel, texto, dados, chatId);
+      await handlePedidoNome(tel, texto, dados, chatIdNorm);
       break;
     case ESTADOS.PEDIDO_ENDERECO:
-      await handlePedidoEndereco(tel, texto, dados, chatId);
+      await handlePedidoEndereco(tel, texto, dados, chatIdNorm);
       break;
     case ESTADOS.PEDIDO_TELEFONE:
-      await handlePedidoTelefone(tel, texto, dados, chatId);
+      await handlePedidoTelefone(tel, texto, dados, chatIdNorm);
       break;
     case ESTADOS.CONFIRMAR:
-      await handleConfirmar(tel, normalizarTextoPedido(texto).replace(/\D/g, ''), dados, chatId);
+      await handleConfirmar(tel, normalizarTextoPedido(texto).replace(/\D/g, ''), dados, chatIdNorm);
       break;
     case ESTADOS.CONFIRMAR_ENTREGA:
-      await handleConfirmarEntrega(tel, texto, dados, chatId);
+      await handleConfirmarEntrega(tel, texto, dados, chatIdNorm);
       break;
     default:
-      await iniciarCardapio(tel, dados, chatId);
+      await iniciarCardapio(tel, dados, chatIdNorm);
   }
 }
 

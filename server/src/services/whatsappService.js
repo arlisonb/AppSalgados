@@ -4,7 +4,7 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const whatsappBot = require('./whatsappBot');
 const configRepo = require('../repositories/configRepository');
-const { isMensagemAtendimento } = require('../utils/whatsappChat');
+const { isMensagemAtendimento, normalizeChatId, getMessageText, extractTelefone } = require('../utils/whatsappChat');
 
 let client = null;
 let io = null;
@@ -108,29 +108,27 @@ function attachMessageHandler() {
   client.onMessage(async (message) => {
     if (!isMensagemAtendimento(message)) return;
 
-    const chatId = message.from || message.chatId;
-    const telefone = chatId.replace(/@c\.us$|@lid$/i, '').replace(/\D/g, '');
-    const conteudo = (message.body || message.caption || '').trim();
-    if (!telefone || telefone === '0') return;
+    const chatId = normalizeChatId(message.from || message.chatId);
+    const telefone = extractTelefone(chatId);
+    const conteudo = getMessageText(message);
+    if (!chatId) return;
 
     console.log(`WhatsApp msg de ${chatId}: ${conteudo.substring(0, 50)}`);
 
     try {
-      if (status !== 'conectado') {
-        whatsappBot.init(client, io);
-        status = 'conectado';
-      }
+      whatsappBot.init(client, io);
+      if (status !== 'conectado') status = 'conectado';
       await whatsappBot.processarMensagem(telefone, conteudo, chatId);
       if (io) {
         io.emit('novaMensagem', {
-          telefone,
+          telefone: telefone || chatId,
           conteudo,
           direcao: 'entrada',
           timestamp: new Date().toISOString()
         });
       }
     } catch (err) {
-      console.error('Erro ao processar mensagem:', err.message);
+      console.error('Erro ao processar mensagem:', err.message, chatId);
     }
   });
 }
