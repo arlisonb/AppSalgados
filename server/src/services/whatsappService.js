@@ -4,7 +4,7 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const whatsappBot = require('./whatsappBot');
 const configRepo = require('../repositories/configRepository');
-const { isMensagemAtendimento, normalizeChatId, getMessageText, extractTelefone } = require('../utils/whatsappChat');
+const { isMensagemAtendimento, normalizeChatId, getMessageText, extractTelefone, isChatIdValido } = require('../utils/whatsappChat');
 
 let client = null;
 let io = null;
@@ -13,6 +13,11 @@ let pairingCode = null;
 let reconnectTimer = null;
 let initializing = false;
 let initializingSince = 0;
+let listenersClient = null;
+let pollTimer = null;
+let pollInitialized = false;
+const processedMsgIds = new Set();
+const lastSeenTimeByChat = new Map();
 
 const SESSION_NAME = process.env.SESSION_NAME || 'iona-salgados';
 const TOKENS_PATH = path.join(__dirname, '../../tokens');
@@ -91,6 +96,12 @@ function withTimeout(promise, ms, label) {
 // Fecha o cliente atual sem nunca travar. clearBrowserLock() em seguida
 // garante que o processo do navegador realmente morra.
 async function closeClientSafe(useLogout) {
+  stopMessagePolling();
+  listenersClient = null;
+  pollInitialized = false;
+  lastSeenTimeByChat.clear();
+  processedMsgIds.clear();
+
   if (!client) return;
   const c = client;
   client = null;
@@ -100,57 +111,138 @@ async function closeClientSafe(useLogout) {
   try { await withTimeout(c.close(), 8000, 'close'); } catch (_) { }
 }
 
-function attachMessageHandler() {
-  if (!client) return;
-  if (client._ionaMessageHandler) return;
-  client._ionaMessageHandler = true;
+function getMessageTime(message) {
+  return Number(message?.t || message?.timestamp || 0);
+}
 
-  const processedIds = new Set();
+function getMessageId(message) {
+  const id = typeof message?.id === 'object' ? message.id?.id : message.id;
+  if (id) return String(id);
+  return `${normalizeChatId(message?.from || message?.chatId)}:${getMessageTime(message)}:${getMessageText(message)}`;
+}
 
-  const handleIncoming = async (message) => {
-    if (message.isNewMsg === false) return;
+function shouldSkipProcessed(message) {
+  const msgId = getMessageId(message);
+  if (processedMsgIds.has(msgId)) return true;
+  processedMsgIds.add(msgId);
+  if (processedMsgIds.size > 2000) {
+    processedMsgIds.delete(processedMsgIds.values().next().value);
+  }
+  return false;
+}
 
-    const msgId = typeof message.id === 'object' ? message.id?.id : message.id;
-    if (msgId) {
-      if (processedIds.has(msgId)) return;
-      processedIds.add(msgId);
-      if (processedIds.size > 500) {
-        processedIds.delete(processedIds.values().next().value);
-      }
+async function processIncomingMessage(message, source = 'event') {
+  if (message.isNewMsg === false && source === 'event') return;
+  if (shouldSkipProcessed(message)) return;
+  if (!isMensagemAtendimento(message)) return;
+
+  const chatId = normalizeChatId(message.from || message.chatId);
+  const telefone = extractTelefone(chatId);
+  const conteudo = getMessageText(message);
+  if (!chatId) return;
+
+  console.log(`WhatsApp msg (${source}) de ${chatId}: ${conteudo.substring(0, 50)}`);
+
+  whatsappBot.init(client, io);
+  if (status !== 'conectado') status = 'conectado';
+  await whatsappBot.processarMensagem(telefone, conteudo, chatId);
+  if (io) {
+    io.emit('novaMensagem', {
+      telefone: telefone || chatId,
+      conteudo,
+      direcao: 'entrada',
+      timestamp: new Date().toISOString()
+    });
+  }
+}
+
+async function pollIncomingMessages() {
+  if (!client || status !== 'conectado') return;
+
+  let chats = [];
+  try {
+    chats = await client.listChats({ count: 50, onlyUsers: true });
+  } catch (err) {
+    console.error('Erro ao listar chats WhatsApp:', err.message);
+    return;
+  }
+
+  for (const chat of chats || []) {
+    const chatId = normalizeChatId(chat.id?._serialized || chat.id);
+    if (!isChatIdValido(chatId)) continue;
+
+    let msgs = [];
+    try {
+      msgs = await client.getAllMessagesInChat(chatId, false, false);
+    } catch (_) {
+      continue;
     }
 
-    if (!isMensagemAtendimento(message)) return;
+    const incoming = (msgs || []).filter((m) => !m.fromMe);
+    if (!incoming.length) continue;
 
-    const chatId = normalizeChatId(message.from || message.chatId);
-    const telefone = extractTelefone(chatId);
-    const conteudo = getMessageText(message);
-    if (!chatId) return;
+    const lastIncoming = incoming[incoming.length - 1];
+    const lastTime = getMessageTime(lastIncoming);
+    const prevTime = lastSeenTimeByChat.get(chatId) || 0;
 
-    console.log(`WhatsApp msg de ${chatId}: ${conteudo.substring(0, 50)}`);
+    if (!pollInitialized) {
+      lastSeenTimeByChat.set(chatId, lastTime);
+      continue;
+    }
 
-    try {
-      whatsappBot.init(client, io);
-      if (status !== 'conectado') status = 'conectado';
-      await whatsappBot.processarMensagem(telefone, conteudo, chatId);
-      if (io) {
-        io.emit('novaMensagem', {
-          telefone: telefone || chatId,
-          conteudo,
-          direcao: 'entrada',
-          timestamp: new Date().toISOString()
-        });
+    const novas = incoming.filter((m) => getMessageTime(m) > prevTime);
+    if (!novas.length) continue;
+
+    lastSeenTimeByChat.set(chatId, getMessageTime(novas[novas.length - 1]));
+
+    for (const msg of novas) {
+      try {
+        await processIncomingMessage(msg, 'poll');
+      } catch (err) {
+        console.error('Erro ao processar mensagem (poll):', err.message, chatId);
       }
+    }
+  }
+
+  pollInitialized = true;
+}
+
+function startMessagePolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(() => {
+    pollIncomingMessages().catch((err) => {
+      console.error('Erro no poll WhatsApp:', err.message);
+    });
+  }, 4000);
+  console.log('Poll de mensagens WhatsApp ativo (4s)');
+}
+
+function stopMessagePolling() {
+  if (!pollTimer) return;
+  clearInterval(pollTimer);
+  pollTimer = null;
+}
+
+function attachMessageHandler() {
+  if (!client) return;
+  if (listenersClient === client) return;
+  listenersClient = client;
+
+  const handleIncoming = async (message) => {
+    try {
+      await processIncomingMessage(message, 'event');
     } catch (err) {
+      const chatId = normalizeChatId(message?.from || message?.chatId);
       console.error('Erro ao processar mensagem:', err.message, chatId);
     }
   };
 
-  // onAnyMessage é mais confiável no WppConnect v2 (onMessage pode não disparar).
+  client.onMessage(handleIncoming);
   if (typeof client.onAnyMessage === 'function') {
     client.onAnyMessage(handleIncoming);
-  } else {
-    client.onMessage(handleIncoming);
   }
+  console.log('Listeners WhatsApp registrados (onMessage + onAnyMessage)');
+  startMessagePolling();
 }
 
 async function initWhatsApp(socketIo) {
@@ -177,8 +269,11 @@ async function initWhatsApp(socketIo) {
       useChrome: false,
       debug: false,
       logQR: false,
-      waitForLogin: false,
+      waitForLogin: true,
       autoClose: 0,
+      puppeteerOptions: {
+        protocolTimeout: 120000
+      },
       browserArgs: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
