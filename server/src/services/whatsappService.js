@@ -105,7 +105,20 @@ function attachMessageHandler() {
   if (client._ionaMessageHandler) return;
   client._ionaMessageHandler = true;
 
-  client.onMessage(async (message) => {
+  const processedIds = new Set();
+
+  const handleIncoming = async (message) => {
+    if (message.isNewMsg === false) return;
+
+    const msgId = typeof message.id === 'object' ? message.id?.id : message.id;
+    if (msgId) {
+      if (processedIds.has(msgId)) return;
+      processedIds.add(msgId);
+      if (processedIds.size > 500) {
+        processedIds.delete(processedIds.values().next().value);
+      }
+    }
+
     if (!isMensagemAtendimento(message)) return;
 
     const chatId = normalizeChatId(message.from || message.chatId);
@@ -130,7 +143,14 @@ function attachMessageHandler() {
     } catch (err) {
       console.error('Erro ao processar mensagem:', err.message, chatId);
     }
-  });
+  };
+
+  // onAnyMessage é mais confiável no WppConnect v2 (onMessage pode não disparar).
+  if (typeof client.onAnyMessage === 'function') {
+    client.onAnyMessage(handleIncoming);
+  } else {
+    client.onMessage(handleIncoming);
+  }
 }
 
 async function initWhatsApp(socketIo) {

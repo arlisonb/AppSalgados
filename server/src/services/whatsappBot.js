@@ -80,19 +80,24 @@ function getSessao(telefone, chatId = null) {
 
   let sessao = getDb().prepare('SELECT * FROM sessoes_whatsapp WHERE telefone = ?').get(key);
 
-  if (!sessao && chatId) {
-    sessao = getDb().prepare(`
-      SELECT * FROM sessoes_whatsapp
-      WHERE estado = ? AND json_extract(dados, '$.chat_id') = ?
-      ORDER BY updated_at DESC LIMIT 1
-    `).get(ESTADOS.CONFIRMAR_ENTREGA, chatId);
-  }
-
   if (!sessao) {
     getDb().prepare('INSERT INTO sessoes_whatsapp (telefone, estado, dados) VALUES (?, ?, ?)').run(key, ESTADOS.ESCOLHENDO_ITENS, '{}');
     sessao = { telefone: key, estado: ESTADOS.ESCOLHENDO_ITENS, dados: '{}' };
   }
-  return { ...sessao, dados: JSON.parse(sessao.dados || '{}') };
+
+  const parsed = { ...sessao, dados: JSON.parse(sessao.dados || '{}') };
+
+  // Sessão de confirmação de entrega expirada (pedido já finalizado/cancelado).
+  if (parsed.estado === ESTADOS.CONFIRMAR_ENTREGA) {
+    const pedido = pedidoRepo.findById(parsed.dados.pedido_id);
+    if (!pedido || pedido.status !== 'saiu_entrega') {
+      const limpa = { chat_id: parsed.dados.chat_id || key, carrinho: [] };
+      setSessao(telefone, ESTADOS.ESCOLHENDO_ITENS, limpa, chatId);
+      return { telefone: key, estado: ESTADOS.ESCOLHENDO_ITENS, dados: limpa };
+    }
+  }
+
+  return parsed;
 }
 
 function setSessao(telefone, estado, dados, chatId = null) {
@@ -388,6 +393,26 @@ async function iniciarCardapio(tel, dados, chatId, opts = {}) {
   await enviarMensagem(tel, texto, chatId);
 }
 
+function isSaudacao(texto) {
+  return /^(ola|oi|olá|hey|menu|cardapio|cardápio|inicio|início|bom dia|boa tarde|boa noite)$/i.test(texto.trim());
+}
+
+function podeReiniciarPorSaudacao(sessao) {
+  const fluxoAtivo = [
+    ESTADOS.CONFIRMAR,
+    ESTADOS.CONFIRMAR_DADOS,
+    ESTADOS.PEDIDO_NOME,
+    ESTADOS.PEDIDO_ENDERECO,
+    ESTADOS.PEDIDO_TELEFONE
+  ];
+  if (fluxoAtivo.includes(sessao.estado)) return false;
+  if (sessao.estado === ESTADOS.CONFIRMAR_ENTREGA) {
+    const pedido = pedidoRepo.findById(sessao.dados?.pedido_id);
+    return pedido?.status !== 'saiu_entrega';
+  }
+  return true;
+}
+
 async function processarMensagem(telefone, mensagem, chatId) {
   const tel = String(telefone || '').replace(/\D/g, '');
   const chatIdNorm = normalizeChatId(chatId);
@@ -398,19 +423,9 @@ async function processarMensagem(telefone, mensagem, chatId) {
 
   salvarMensagem(tel || chatIdNorm, 'entrada', mensagem, dados.cliente_id);
 
-  if (/^(ola|oi|olá|hey|menu|cardapio|cardápio|inicio|início|bom dia|boa tarde|boa noite)$/i.test(textoLower)) {
-    const emFluxo = [
-      ESTADOS.CONFIRMAR_ENTREGA,
-      ESTADOS.CONFIRMAR,
-      ESTADOS.CONFIRMAR_DADOS,
-      ESTADOS.PEDIDO_NOME,
-      ESTADOS.PEDIDO_ENDERECO,
-      ESTADOS.PEDIDO_TELEFONE
-    ].includes(sessao.estado);
-    if (!emFluxo) {
-      await iniciarAtendimento(tel, dados, chatIdNorm);
-      return;
-    }
+  if (isSaudacao(textoLower) && podeReiniciarPorSaudacao(sessao)) {
+    await iniciarAtendimento(tel, { chat_id: chatIdNorm, carrinho: [] }, chatIdNorm);
+    return;
   }
 
   switch (sessao.estado) {
