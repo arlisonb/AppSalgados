@@ -3,6 +3,7 @@ package com.ionasalgados.app.presentation.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ionasalgados.app.data.local.ServerConfigStore
+import com.ionasalgados.app.data.print.BluetoothPrinterDevice
 import com.ionasalgados.app.data.print.PrinterService
 import com.ionasalgados.app.data.remote.ApiProvider
 import com.ionasalgados.app.data.remote.ServerDiscoveryService
@@ -91,10 +92,15 @@ class MainViewModel @Inject constructor(
                         viewModelScope.launch {
                             pedidoRepository.cachePedido(event.pedido)
                             refreshData()
+                            // Dedupe no PrinterService garante 1 via mesmo com 2 eventos
+                            printerService.printPedido(event.pedido)
                         }
-                        printerService.printPedido(event.pedido)
                     }
-                    is SocketEvent.ImprimirPedido -> printerService.printPedido(event.pedido)
+                    is SocketEvent.ImprimirPedido -> {
+                        viewModelScope.launch {
+                            printerService.printPedido(event.pedido)
+                        }
+                    }
                     is SocketEvent.PedidoAtualizado -> refreshData()
                     is SocketEvent.PedidoCancelado -> refreshData()
                     is SocketEvent.PedidoRecebido -> {
@@ -175,7 +181,7 @@ class DashboardViewModel @Inject constructor(
                 _message.value = "Pedido não encontrado"
                 return@launch
             }
-            printerService.printPedido(pedido)
+            printerService.printPedido(pedido, force = true)
             _message.value = if (printerService.isConnected()) {
                 "Pedido #${pedido.numero} enviado para impressão!"
             } else {
@@ -267,7 +273,7 @@ class PedidoDetalheViewModel @Inject constructor(
     fun reimprimir() {
         viewModelScope.launch {
             val pedido = _pedido.value ?: return@launch
-            printerService.printPedido(pedido)
+            printerService.printPedido(pedido, force = true)
             _message.value = if (printerService.isConnected()) {
                 "Enviado para impressão!"
             } else {
@@ -503,7 +509,7 @@ class WhatsAppViewModel @Inject constructor(
     private fun aguardarCodigo() {
         viewModelScope.launch {
             _message.value = "Aguarde o código..."
-            repeat(25) {
+            repeat(40) {
                 delay(2000)
                 configRepository.getWhatsAppStatus()?.let { wa ->
                     if (!wa.pairingCode.isNullOrBlank()) {
@@ -520,7 +526,7 @@ class WhatsAppViewModel @Inject constructor(
                 }
             }
             if (_pairingCode.value.isNullOrBlank() && !_isConnected.value) {
-                _message.value = "Código não gerado. Toque em atualizar e tente novamente."
+                _message.value = "Código não gerado. Toque em Gerar código novamente."
             }
         }
     }
@@ -559,6 +565,10 @@ class ConfiguracoesViewModel @Inject constructor(
     val message = _message.asStateFlow()
     private val _printerMac = MutableStateFlow("")
     val printerMac = _printerMac.asStateFlow()
+    private val _printerDevices = MutableStateFlow<List<BluetoothPrinterDevice>>(emptyList())
+    val printerDevices = _printerDevices.asStateFlow()
+    private val _printerConnected = MutableStateFlow(false)
+    val printerConnected = _printerConnected.asStateFlow()
     private val _discovering = MutableStateFlow(false)
     val discovering = _discovering.asStateFlow()
 
@@ -569,6 +579,18 @@ class ConfiguracoesViewModel @Inject constructor(
             _serverUrl.value = serverConfig.getServerUrl()
             _config.value = configRepository.getConfiguracoes()
             _printerMac.value = serverConfig.getPrinterMac()
+            _printerConnected.value = printerService.isConnected()
+            refreshPrinterDevices()
+        }
+    }
+
+    fun refreshPrinterDevices() {
+        _printerDevices.value = printerService.getPairedDevices()
+        _printerConnected.value = printerService.isConnected()
+        if (_printerDevices.value.isEmpty() && printerService.hasBluetoothPermission()) {
+            if (!printerService.isBluetoothEnabled()) {
+                _message.value = "Ative o Bluetooth do celular"
+            }
         }
     }
 
@@ -616,13 +638,31 @@ class ConfiguracoesViewModel @Inject constructor(
 
     fun conectarImpressora(mac: String) {
         viewModelScope.launch {
-            serverConfig.setPrinterMac(mac)
-            _printerMac.value = mac
-            if (printerService.connect(mac)) {
+            val clean = mac.trim().uppercase()
+            if (!printerService.hasBluetoothPermission()) {
+                _message.value = "Permita o acesso ao Bluetooth nas configurações do app"
+                return@launch
+            }
+            if (!printerService.isBluetoothEnabled()) {
+                _message.value = "Ative o Bluetooth do celular"
+                return@launch
+            }
+            if (!PrinterService.isValidMac(clean)) {
+                _message.value = "Endereço MAC inválido. Ex: AA:BB:CC:DD:EE:FF"
+                return@launch
+            }
+
+            _message.value = "Conectando impressora..."
+            serverConfig.setPrinterMac(clean)
+            _printerMac.value = clean
+            if (printerService.connect(clean)) {
+                _printerConnected.value = true
                 _message.value = "Impressora conectada!"
             } else {
-                _message.value = "Erro ao conectar impressora"
+                _printerConnected.value = false
+                _message.value = "Erro ao conectar. Pareie a impressora no Bluetooth do celular e tente de novo."
             }
+            refreshPrinterDevices()
         }
     }
 }

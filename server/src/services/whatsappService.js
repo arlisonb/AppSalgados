@@ -245,8 +245,9 @@ function attachMessageHandler() {
   startMessagePolling();
 }
 
-async function initWhatsApp(socketIo) {
+async function initWhatsApp(socketIo, options = {}) {
   io = socketIo;
+  const forceFresh = options.forceFresh === true;
   const phoneNumber = getPhoneNumber();
 
   if (!phoneNumber) {
@@ -256,7 +257,12 @@ async function initWhatsApp(socketIo) {
     return null;
   }
 
-  clearBrowserLock();
+  // Pareamento novo exige pasta limpa; senão o WppConnect pode não gerar código.
+  if (forceFresh) {
+    removeSessionData();
+  } else {
+    clearBrowserLock();
+  }
 
   try {
     client = await wppconnect.create({
@@ -269,8 +275,11 @@ async function initWhatsApp(socketIo) {
       useChrome: false,
       debug: false,
       logQR: false,
-      waitForLogin: true,
+      // false = create() retorna e catchLinkCode pode emitir o código.
+      // true bloqueava o pareamento após desconectar.
+      waitForLogin: false,
       autoClose: 0,
+      deviceSyncTimeout: 0,
       puppeteerOptions: {
         protocolTimeout: 120000
       },
@@ -305,9 +314,6 @@ async function initWhatsApp(socketIo) {
           return;
         }
 
-        // Enquanto houver um código pendente, manter o status estável em
-        // 'aguardando_codigo'. Estados intermediários (notLogged,
-        // desconnectedMobile, etc.) fariam o app piscar "desconectado".
         if (pairingCode) {
           status = 'aguardando_codigo';
         } else if (statusSession === 'notLogged') {
@@ -345,9 +351,15 @@ async function initWhatsApp(socketIo) {
     return client;
   } catch (err) {
     console.error('Erro ao conectar WhatsApp:', err.message);
+    // Se o código já veio, não sobrescrever com erro nem forçar reconexão automática.
+    if (pairingCode) {
+      status = 'aguardando_codigo';
+      if (io) io.emit('statusWhatsApp', getStatus());
+      return client;
+    }
     status = 'erro';
     if (io) io.emit('statusWhatsApp', { status: 'erro', error: err.message });
-    if (!pairingCode) scheduleReconnect();
+    if (!options.skipAutoReconnect) scheduleReconnect();
     throw err;
   }
 }
@@ -379,12 +391,8 @@ function getClient() {
 }
 
 async function reconectar(telefone) {
-  const numeroAntigo = getPhoneNumber();
-  let numeroMudou = false;
-
   if (telefone) {
     const clean = normalizePhone(telefone);
-    numeroMudou = clean !== numeroAntigo;
     configRepo.setConfig('whatsapp', clean);
   }
 
@@ -401,7 +409,8 @@ async function reconectar(telefone) {
   }
 
   if (initializing) {
-    await waitForPairingCode(30000);
+    console.log('Já existe uma inicialização em andamento — aguardando código...');
+    await waitForPairingCode(45000);
     return getStatus();
   }
 
@@ -409,29 +418,30 @@ async function reconectar(telefone) {
   initializingSince = Date.now();
   pairingCode = null;
   status = 'reconectando';
+  if (io) io.emit('statusWhatsApp', getStatus());
 
-  // Encerra qualquer navegador da sessão atual.
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+
+  // Fecha cliente e APAGA a sessão — necessário para gerar código novo
+  // depois de desconectar (mesmo número ou outro).
   await closeClientSafe(false);
-
-  // Trocar de número exige apagar a sessão antiga, senão o WppConnect
-  // reconecta no número anterior em vez de pedir código pro novo.
-  if (numeroMudou) {
-    console.log('Número alterado — limpando sessão para novo pareamento');
-    removeSessionData();
-  } else {
-    clearBrowserLock();
-  }
-
-  await sleep(2000);
+  removeSessionData();
+  await sleep(3000);
 
   try {
-    // initWhatsApp não pode travar o ciclo indefinidamente.
-    await withTimeout(initWhatsApp(io), 60000, 'initWhatsApp');
-    await waitForPairingCode(45000);
+    await initWhatsApp(io, { forceFresh: true, skipAutoReconnect: true });
+    // Espera um pouco pelo código; o app continua polling se ainda não chegou.
+    const code = await waitForPairingCode(35000);
+    if (code) {
+      status = 'aguardando_codigo';
+      console.log('Código de pareamento pronto:', code);
+    } else if (status !== 'conectado') {
+      console.warn('WhatsApp iniciado, mas código ainda não chegou');
+      status = 'aguardando_codigo';
+    }
   } catch (err) {
     if (pairingCode) {
       status = 'aguardando_codigo';
@@ -444,6 +454,7 @@ async function reconectar(telefone) {
     initializing = false;
   }
 
+  if (io) io.emit('statusWhatsApp', getStatus());
   return getStatus();
 }
 
@@ -476,10 +487,11 @@ async function desconectar() {
   initializing = false;
   pairingCode = null;
 
-  // logout invalida a sessão no WhatsApp; em seguida apagamos os dados locais
-  // para que reconectar (mesmo número ou outro) faça sempre um pareamento novo.
-  await closeClientSafe(true);
+  // Fecha sem logout longo (logout costuma travar). Apaga a sessão local
+  // para o próximo "Gerar código" sempre pedir pareamento novo.
+  await closeClientSafe(false);
   removeSessionData();
+  await sleep(1500);
 
   status = 'desconectado';
   if (io) io.emit('statusWhatsApp', { status: 'desconectado', pairingCode: null });
