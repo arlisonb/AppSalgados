@@ -245,6 +245,52 @@ function attachMessageHandler() {
   startMessagePolling();
 }
 
+async function requestPairingCode(phoneNumber) {
+  if (!client?.page || !phoneNumber) return null;
+  try {
+    // Aguarda o WA-JS ficar pronto antes de pedir o código.
+    await client.page.waitForFunction(() => window.WPP?.isReady === true, {
+      timeout: 30000
+    }).catch(() => { });
+
+    const code = await client.page.evaluate(async (phone) => {
+      if (!window.WPP?.conn?.genLinkDeviceCodeForPhoneNumber) {
+        throw new Error('genLinkDeviceCodeForPhoneNumber indisponível');
+      }
+      return await WPP.conn.genLinkDeviceCodeForPhoneNumber(phone, true);
+    }, phoneNumber);
+
+    if (code) {
+      pairingCode = String(code);
+      status = 'aguardando_codigo';
+      console.log('\n========================================');
+      console.log('  CÓDIGO WHATSAPP:', pairingCode);
+      console.log('  WhatsApp > Aparelhos conectados > Conectar aparelho');
+      console.log('========================================\n');
+      if (io) {
+        io.emit('statusWhatsApp', { status, pairingCode, phoneNumber });
+        io.emit('codigoWhatsApp', { code: pairingCode, phoneNumber });
+      }
+    }
+    return pairingCode;
+  } catch (err) {
+    console.error('Erro ao gerar código de pareamento:', err.message);
+    return null;
+  }
+}
+
+async function ensurePairingCode(phoneNumber, attempts = 5) {
+  for (let i = 0; i < attempts; i++) {
+    if (status === 'conectado') return null;
+    if (pairingCode) return pairingCode;
+    console.log(`Solicitando código de pareamento (tentativa ${i + 1}/${attempts})...`);
+    const code = await requestPairingCode(phoneNumber);
+    if (code) return code;
+    await sleep(3000);
+  }
+  return pairingCode;
+}
+
 async function initWhatsApp(socketIo, options = {}) {
   io = socketIo;
   const forceFresh = options.forceFresh === true;
@@ -257,7 +303,6 @@ async function initWhatsApp(socketIo, options = {}) {
     return null;
   }
 
-  // Pareamento novo exige pasta limpa; senão o WppConnect pode não gerar código.
   if (forceFresh) {
     removeSessionData();
   } else {
@@ -275,8 +320,6 @@ async function initWhatsApp(socketIo, options = {}) {
       useChrome: false,
       debug: false,
       logQR: false,
-      // false = create() retorna e catchLinkCode pode emitir o código.
-      // true bloqueava o pareamento após desconectar.
       waitForLogin: false,
       autoClose: 0,
       deviceSyncTimeout: 0,
@@ -305,7 +348,9 @@ async function initWhatsApp(socketIo, options = {}) {
       statusFind: (statusSession) => {
         console.log('Status WhatsApp:', statusSession);
 
-        if (['isLogged', 'inChat', 'qrReadSuccess', 'chatsAvailable'].includes(statusSession)) {
+        // inChat sozinho NÃO significa pareado — no WppConnect v2 ele dispara
+        // cedo demais (ainda UNPAIRED/QR) e o app mostrava "conectado" sem código.
+        if (['isLogged', 'qrReadSuccess', 'chatsAvailable'].includes(statusSession)) {
           status = 'conectado';
           pairingCode = null;
           whatsappBot.init(client, io);
@@ -314,10 +359,21 @@ async function initWhatsApp(socketIo, options = {}) {
           return;
         }
 
+        if (statusSession === 'inChat') {
+          // Só confirma se já estávamos autenticados; senão continua aguardando código.
+          if (status === 'conectado') {
+            if (io) io.emit('statusWhatsApp', { status: 'conectado' });
+            return;
+          }
+          status = 'aguardando_codigo';
+          if (io) io.emit('statusWhatsApp', { status, pairingCode });
+          return;
+        }
+
         if (pairingCode) {
           status = 'aguardando_codigo';
-        } else if (statusSession === 'notLogged') {
-          status = 'notLogged';
+        } else if (statusSession === 'notLogged' || statusSession === 'disconnectedMobile') {
+          status = 'aguardando_codigo';
         } else if (statusSession !== 'autocloseCalled') {
           status = statusSession;
         }
@@ -328,17 +384,34 @@ async function initWhatsApp(socketIo, options = {}) {
 
     client.onStateChange((state) => {
       console.log('Estado WhatsApp:', state);
-      if (state === 'CONNECTED' || state === 'OPENING') {
-        whatsappBot.init(client, io);
-        attachMessageHandler();
+      if (state === 'CONNECTED') {
+        // CONNECTED do stream ≠ aparelho pareado; só promove se já autenticado.
+        if (status === 'conectado') {
+          whatsappBot.init(client, io);
+          attachMessageHandler();
+        }
+      }
+      if (state === 'UNPAIRED' || state === 'UNLAUNCHED' || state === 'TIMEOUT') {
+        if (status === 'conectado') {
+          status = 'aguardando_codigo';
+          pairingCode = null;
+          if (io) io.emit('statusWhatsApp', { status, pairingCode: null });
+        }
+        // Força geração do código quando cai em UNPAIRED sem código.
+        if (!pairingCode && getPhoneNumber()) {
+          ensurePairingCode(getPhoneNumber(), 3).catch(() => { });
+        }
       }
       if (state === 'CONFLICT') {
         scheduleReconnect();
       }
     });
 
-    whatsappBot.init(client, io);
-    attachMessageHandler();
+    // Se ainda não veio código pelo catchLinkCode, força via WA-JS.
+    if (status !== 'conectado' && !pairingCode) {
+      await sleep(2500);
+      await ensurePairingCode(phoneNumber, 4);
+    }
 
     if (pairingCode) {
       status = 'aguardando_codigo';
@@ -351,7 +424,6 @@ async function initWhatsApp(socketIo, options = {}) {
     return client;
   } catch (err) {
     console.error('Erro ao conectar WhatsApp:', err.message);
-    // Se o código já veio, não sobrescrever com erro nem forçar reconexão automática.
     if (pairingCode) {
       status = 'aguardando_codigo';
       if (io) io.emit('statusWhatsApp', getStatus());
