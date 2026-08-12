@@ -245,50 +245,106 @@ function attachMessageHandler() {
   startMessagePolling();
 }
 
-async function requestPairingCode(phoneNumber) {
-  if (!client?.page || !phoneNumber) return null;
-  try {
-    // Aguarda o WA-JS ficar pronto antes de pedir o código.
-    await client.page.waitForFunction(() => window.WPP?.isReady === true, {
-      timeout: 30000
-    }).catch(() => { });
+let pairingLock = Promise.resolve();
+let pairingBusy = false;
 
-    const code = await client.page.evaluate(async (phone) => {
-      if (!window.WPP?.conn?.genLinkDeviceCodeForPhoneNumber) {
-        throw new Error('genLinkDeviceCodeForPhoneNumber indisponível');
+function emitPairingCode(code, phoneNumber) {
+  if (!code) return;
+  pairingCode = String(code);
+  status = 'aguardando_codigo';
+  console.log('\n========================================');
+  console.log('  CÓDIGO WHATSAPP:', pairingCode);
+  console.log('  WhatsApp > Aparelhos conectados > Conectar aparelho');
+  console.log('========================================\n');
+  if (io) {
+    io.emit('statusWhatsApp', { status, pairingCode, phoneNumber });
+    io.emit('codigoWhatsApp', { code: pairingCode, phoneNumber });
+  }
+}
+
+async function waitForAuthReady(timeoutMs = 45000) {
+  if (!client?.page) return false;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!client?.page || client.page.isClosed()) return false;
+    try {
+      const state = await client.page.evaluate(async () => {
+        const ready = !!window.WPP?.isReady;
+        const registered = !!(window.WPP?.conn?.isRegistered?.());
+        let auth = null;
+        try {
+          auth = ready ? await window.WPP.conn.getAuthCode() : null;
+        } catch (_) { }
+        return { ready, registered, hasAuth: !!auth };
+      });
+      if (state.registered) return false;
+      if (state.ready && state.hasAuth) return true;
+    } catch (_) { }
+    await sleep(1500);
+  }
+  return false;
+}
+
+async function requestPairingCode(phoneNumber) {
+  if (!client?.page || !phoneNumber || pairingCode) return pairingCode;
+  if (client.page.isClosed()) return null;
+
+  try {
+    console.log('Aguardando tela de pareamento (QR/auth) ficar pronta...');
+    const ready = await waitForAuthReady(45000);
+    if (!ready) {
+      console.warn('Tela de pareamento não ficou pronta a tempo');
+    }
+
+    if (!client?.page || client.page.isClosed()) return null;
+
+    const result = await client.page.evaluate(async (phone) => {
+      try {
+        if (!window.WPP?.conn?.genLinkDeviceCodeForPhoneNumber) {
+          return { error: 'API genLinkDeviceCodeForPhoneNumber indisponível' };
+        }
+        const code = await WPP.conn.genLinkDeviceCodeForPhoneNumber(phone, false);
+        return { code: code ? String(code) : null };
+      } catch (e) {
+        return {
+          error: (e && (e.message || e.toString && e.toString())) || 'erro desconhecido',
+          raw: String(e)
+        };
       }
-      return await WPP.conn.genLinkDeviceCodeForPhoneNumber(phone, true);
     }, phoneNumber);
 
-    if (code) {
-      pairingCode = String(code);
-      status = 'aguardando_codigo';
-      console.log('\n========================================');
-      console.log('  CÓDIGO WHATSAPP:', pairingCode);
-      console.log('  WhatsApp > Aparelhos conectados > Conectar aparelho');
-      console.log('========================================\n');
-      if (io) {
-        io.emit('statusWhatsApp', { status, pairingCode, phoneNumber });
-        io.emit('codigoWhatsApp', { code: pairingCode, phoneNumber });
-      }
+    if (result?.error) {
+      console.error('Erro ao gerar código de pareamento:', result.error, result.raw || '');
+      return null;
     }
-    return pairingCode;
+    if (result?.code) {
+      emitPairingCode(result.code, phoneNumber);
+      return pairingCode;
+    }
+    console.warn('genLinkDeviceCodeForPhoneNumber retornou vazio');
+    return null;
   } catch (err) {
-    console.error('Erro ao gerar código de pareamento:', err.message);
+    console.error('Erro ao gerar código de pareamento:', err.message || err);
     return null;
   }
 }
 
-async function ensurePairingCode(phoneNumber, attempts = 5) {
-  for (let i = 0; i < attempts; i++) {
-    if (status === 'conectado') return null;
-    if (pairingCode) return pairingCode;
-    console.log(`Solicitando código de pareamento (tentativa ${i + 1}/${attempts})...`);
-    const code = await requestPairingCode(phoneNumber);
-    if (code) return code;
-    await sleep(3000);
+function ensurePairingCode(phoneNumber) {
+  if (!phoneNumber || pairingCode || status === 'conectado' || pairingBusy) {
+    return Promise.resolve(pairingCode);
   }
-  return pairingCode;
+
+  pairingBusy = true;
+  const job = pairingLock.then(async () => {
+    if (pairingCode || status === 'conectado') return pairingCode;
+    console.log('Solicitando código de pareamento...');
+    return requestPairingCode(phoneNumber);
+  }).finally(() => {
+    pairingBusy = false;
+  });
+
+  pairingLock = job.catch(() => { });
+  return job;
 }
 
 async function initWhatsApp(socketIo, options = {}) {
@@ -334,22 +390,11 @@ async function initWhatsApp(socketIo, options = {}) {
         '--disable-gpu'
       ],
       catchLinkCode: (code) => {
-        pairingCode = code;
-        status = 'aguardando_codigo';
-        console.log('\n========================================');
-        console.log('  CÓDIGO WHATSAPP:', code);
-        console.log('  WhatsApp > Aparelhos conectados > Conectar aparelho');
-        console.log('========================================\n');
-        if (io) {
-          io.emit('statusWhatsApp', { status, pairingCode: code, phoneNumber });
-          io.emit('codigoWhatsApp', { code, phoneNumber });
-        }
+        emitPairingCode(code, phoneNumber);
       },
       statusFind: (statusSession) => {
         console.log('Status WhatsApp:', statusSession);
 
-        // inChat sozinho NÃO significa pareado — no WppConnect v2 ele dispara
-        // cedo demais (ainda UNPAIRED/QR) e o app mostrava "conectado" sem código.
         if (['isLogged', 'qrReadSuccess', 'chatsAvailable'].includes(statusSession)) {
           status = 'conectado';
           pairingCode = null;
@@ -360,7 +405,6 @@ async function initWhatsApp(socketIo, options = {}) {
         }
 
         if (statusSession === 'inChat') {
-          // Só confirma se já estávamos autenticados; senão continua aguardando código.
           if (status === 'conectado') {
             if (io) io.emit('statusWhatsApp', { status: 'conectado' });
             return;
@@ -374,7 +418,7 @@ async function initWhatsApp(socketIo, options = {}) {
           status = 'aguardando_codigo';
         } else if (statusSession === 'notLogged' || statusSession === 'disconnectedMobile') {
           status = 'aguardando_codigo';
-        } else if (statusSession !== 'autocloseCalled') {
+        } else if (statusSession !== 'autocloseCalled' && statusSession !== 'browserClose') {
           status = statusSession;
         }
 
@@ -384,22 +428,15 @@ async function initWhatsApp(socketIo, options = {}) {
 
     client.onStateChange((state) => {
       console.log('Estado WhatsApp:', state);
-      if (state === 'CONNECTED') {
-        // CONNECTED do stream ≠ aparelho pareado; só promove se já autenticado.
-        if (status === 'conectado') {
-          whatsappBot.init(client, io);
-          attachMessageHandler();
-        }
+      if (state === 'CONNECTED' && status === 'conectado') {
+        whatsappBot.init(client, io);
+        attachMessageHandler();
       }
-      if (state === 'UNPAIRED' || state === 'UNLAUNCHED' || state === 'TIMEOUT') {
+      if (state === 'UNPAIRED' || state === 'UNLAUNCHED') {
         if (status === 'conectado') {
           status = 'aguardando_codigo';
           pairingCode = null;
           if (io) io.emit('statusWhatsApp', { status, pairingCode: null });
-        }
-        // Força geração do código quando cai em UNPAIRED sem código.
-        if (!pairingCode && getPhoneNumber()) {
-          ensurePairingCode(getPhoneNumber(), 3).catch(() => { });
         }
       }
       if (state === 'CONFLICT') {
@@ -407,15 +444,16 @@ async function initWhatsApp(socketIo, options = {}) {
       }
     });
 
-    // Se ainda não veio código pelo catchLinkCode, força via WA-JS.
+    // Deixa o fluxo nativo do WppConnect tentar (catchLinkCode).
+    // Se em 8s não veio código, gera UMA vez via WA-JS (com lock).
     if (status !== 'conectado' && !pairingCode) {
-      await sleep(2500);
-      await ensurePairingCode(phoneNumber, 4);
+      await sleep(8000);
+      if (!pairingCode && status !== 'conectado') {
+        await ensurePairingCode(phoneNumber);
+      }
     }
 
-    if (pairingCode) {
-      status = 'aguardando_codigo';
-    } else if (status !== 'conectado') {
+    if (status !== 'conectado') {
       status = 'aguardando_codigo';
     }
 
@@ -505,8 +543,8 @@ async function reconectar(telefone) {
 
   try {
     await initWhatsApp(io, { forceFresh: true, skipAutoReconnect: true });
-    // Espera um pouco pelo código; o app continua polling se ainda não chegou.
-    const code = await waitForPairingCode(35000);
+    // init já espera a tela de pareamento; aqui só consolida o resultado.
+    const code = await waitForPairingCode(20000);
     if (code) {
       status = 'aguardando_codigo';
       console.log('Código de pareamento pronto:', code);
