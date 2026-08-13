@@ -21,6 +21,9 @@ const lastSeenTimeByChat = new Map();
 
 const SESSION_NAME = process.env.SESSION_NAME || 'iona-salgados';
 const TOKENS_PATH = path.join(__dirname, '../../tokens');
+// Fora da pasta da sessão — sobrevive a removeSessionData() e a restart do serviço.
+const RATE_LIMIT_FILE = path.join(TOKENS_PATH, '.pairing-rate-limit.json');
+const RATE_LIMIT_MINUTES = 60;
 
 function normalizePhone(phone) {
   let clean = String(phone || '').replace(/\D/g, '');
@@ -250,11 +253,51 @@ let pairingBusy = false;
 let lastError = null;
 let rateLimitedUntil = 0;
 
+function loadRateLimit() {
+  try {
+    if (!fs.existsSync(RATE_LIMIT_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(RATE_LIMIT_FILE, 'utf8'));
+    const until = Number(data?.until || 0);
+    if (until > Date.now()) {
+      rateLimitedUntil = until;
+      applyRateLimitedStatus();
+      console.warn(
+        `Rate limit WhatsApp ativo até ${new Date(until).toLocaleString('pt-BR')} ` +
+        `(~${Math.ceil((until - Date.now()) / 60000)} min). Sem nova tentativa de código.`
+      );
+    } else if (until > 0) {
+      clearRateLimitFile();
+    }
+  } catch (err) {
+    console.warn('Não foi possível ler rate limit salva:', err.message);
+  }
+}
+
+function saveRateLimit() {
+  try {
+    if (!fs.existsSync(TOKENS_PATH)) fs.mkdirSync(TOKENS_PATH, { recursive: true });
+    fs.writeFileSync(
+      RATE_LIMIT_FILE,
+      JSON.stringify({ until: rateLimitedUntil, savedAt: Date.now() }, null, 2)
+    );
+  } catch (err) {
+    console.warn('Não foi possível salvar rate limit:', err.message);
+  }
+}
+
+function clearRateLimitFile() {
+  rateLimitedUntil = 0;
+  try {
+    if (fs.existsSync(RATE_LIMIT_FILE)) fs.unlinkSync(RATE_LIMIT_FILE);
+  } catch (_) { }
+}
+
 function emitPairingCode(code, phoneNumber) {
   if (!code) return;
   pairingCode = String(code);
   status = 'aguardando_codigo';
   lastError = null;
+  clearRateLimitFile();
   console.log('\n========================================');
   console.log('  CÓDIGO WHATSAPP:', pairingCode);
   console.log('  WhatsApp > Aparelhos conectados > Conectar aparelho');
@@ -266,16 +309,31 @@ function emitPairingCode(code, phoneNumber) {
 }
 
 function isRateLimited() {
-  return Date.now() < rateLimitedUntil;
+  if (rateLimitedUntil > Date.now()) return true;
+  if (rateLimitedUntil > 0) clearRateLimitFile();
+  return false;
 }
 
-function markRateLimited(minutes = 30) {
-  rateLimitedUntil = Date.now() + minutes * 60 * 1000;
+function applyRateLimitedStatus() {
+  const minutes = Math.max(1, Math.ceil((rateLimitedUntil - Date.now()) / 60000));
   status = 'erro_pareamento';
-  lastError = `WhatsApp limitou as tentativas de pareamento (CompanionHelloError/429). Aguarde cerca de ${minutes} minutos e tente de novo. Evite desconectar/reconectar várias vezes seguidas.`;
+  lastError =
+    `WhatsApp limitou as tentativas de pareamento (CompanionHelloError/429). ` +
+    `Aguarde cerca de ${minutes} minutos e tente de novo. ` +
+    `Não reinicie o serviço nem aperte Gerar código — isso piora o bloqueio.`;
   console.error(lastError);
   if (io) io.emit('statusWhatsApp', getStatus());
 }
+
+function markRateLimited(minutes = RATE_LIMIT_MINUTES) {
+  rateLimitedUntil = Date.now() + minutes * 60 * 1000;
+  saveRateLimit();
+  applyRateLimitedStatus();
+  // Para o browser para não gerar mais tráfego de pareamento.
+  closeClientSafe(false).catch(() => { });
+}
+
+loadRateLimit();
 
 async function waitForAuthReady(timeoutMs = 45000) {
   if (!client?.page) return false;
@@ -304,7 +362,7 @@ async function requestPairingCode(phoneNumber) {
   if (!client?.page || !phoneNumber || pairingCode) return pairingCode;
   if (client.page.isClosed()) return null;
   if (isRateLimited()) {
-    markRateLimited(Math.max(1, Math.ceil((rateLimitedUntil - Date.now()) / 60000)));
+    applyRateLimitedStatus();
     return null;
   }
 
@@ -337,7 +395,7 @@ async function requestPairingCode(phoneNumber) {
       console.error('Erro ao gerar código de pareamento:', result.error, result.raw || '');
       const blob = `${result.error} ${result.raw || ''}`.toLowerCase();
       if (blob.includes('companionhello') || blob.includes('rate-overlimit') || blob.includes('429')) {
-        markRateLimited(30);
+        markRateLimited(RATE_LIMIT_MINUTES);
       } else {
         lastError = result.error;
         status = 'erro_pareamento';
@@ -355,7 +413,7 @@ async function requestPairingCode(phoneNumber) {
     console.error('Erro ao gerar código de pareamento:', err.message || err);
     const blob = String(err.message || err).toLowerCase();
     if (blob.includes('companionhello') || blob.includes('rate-overlimit') || blob.includes('429')) {
-      markRateLimited(30);
+      markRateLimited(RATE_LIMIT_MINUTES);
     }
     return null;
   }
@@ -366,7 +424,7 @@ function ensurePairingCode(phoneNumber) {
     return Promise.resolve(pairingCode);
   }
   if (isRateLimited()) {
-    markRateLimited(Math.max(1, Math.ceil((rateLimitedUntil - Date.now()) / 60000)));
+    applyRateLimitedStatus();
     return Promise.resolve(null);
   }
 
@@ -392,6 +450,12 @@ async function initWhatsApp(socketIo, options = {}) {
     status = 'sem_telefone';
     console.warn('Configure o número do WhatsApp no app (tela WhatsApp ou Configurações)');
     if (io) io.emit('statusWhatsApp', { status, message: 'Configure o número do WhatsApp' });
+    return null;
+  }
+
+  // Não abre browser / não pede código enquanto o 429 estiver ativo.
+  if (isRateLimited()) {
+    applyRateLimitedStatus();
     return null;
   }
 
@@ -437,6 +501,7 @@ async function initWhatsApp(socketIo, options = {}) {
           status = 'conectado';
           pairingCode = null;
           lastError = null;
+          clearRateLimitFile();
           whatsappBot.init(client, io);
           attachMessageHandler();
           if (io) io.emit('statusWhatsApp', getStatus());
@@ -565,7 +630,7 @@ async function reconectar(telefone) {
   }
 
   if (isRateLimited()) {
-    markRateLimited(Math.max(1, Math.ceil((rateLimitedUntil - Date.now()) / 60000)));
+    applyRateLimitedStatus();
     return getStatus();
   }
 
