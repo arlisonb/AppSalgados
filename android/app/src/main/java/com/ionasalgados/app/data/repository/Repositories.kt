@@ -396,5 +396,7 @@ data class WhatsAppStatusDto(
     val status: String?,
     val pairingCode: String?,
     val phoneNumber: String?,
-    val session: String?
+    val session: String?,
+    val message: String? = null,
+    val rateLimitedMinutes: Int? = null
 )

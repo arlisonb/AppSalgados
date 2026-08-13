@@ -177,8 +177,9 @@ class SocketService @Inject constructor(
             on("statusWhatsApp") { args ->
                 val json = args.getOrNull(0) as? JSONObject
                 val status = json?.optString("status") ?: "desconhecido"
-                val code = json?.optString("pairingCode")
-                _events.tryEmit(SocketEvent.WhatsAppStatus(status, code))
+                val code = json?.optString("pairingCode")?.takeIf { it.isNotBlank() && it != "null" }
+                val message = json?.optString("message")?.takeIf { it.isNotBlank() && it != "null" }
+                _events.tryEmit(SocketEvent.WhatsAppStatus(status, code, message))
             }
             on("codigoWhatsApp") { args ->
                 val json = args.getOrNull(0) as? JSONObject
@@ -245,6 +246,6 @@ sealed class SocketEvent {
     data class PedidoRecebido(val pedido: Pedido) : SocketEvent()
     data class PedidoCancelado(val pedido: Pedido) : SocketEvent()
     data class ImprimirPedido(val pedido: Pedido) : SocketEvent()
-    data class WhatsAppStatus(val status: String, val code: String? = null) : SocketEvent()
+    data class WhatsAppStatus(val status: String, val code: String? = null, val message: String? = null) : SocketEvent()
     data class WhatsAppCode(val code: String?) : SocketEvent()
 }

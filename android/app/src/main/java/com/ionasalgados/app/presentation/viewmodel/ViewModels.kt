@@ -451,11 +451,16 @@ class WhatsAppViewModel @Inject constructor(
                     is SocketEvent.WhatsAppStatus -> {
                         _whatsappStatus.value = event.status
                         event.code?.let { _pairingCode.value = it }
-                        _isConnected.value = event.status in listOf("conectado", "isLogged", "inChat")
+                        // Só "conectado"/"isLogged" — inChat prematuro NÃO conta
+                        _isConnected.value = event.status in listOf("conectado", "isLogged")
+                        if (event.status == "erro_pareamento" && !event.message.isNullOrBlank()) {
+                            _message.value = event.message
+                        }
                     }
                     is SocketEvent.WhatsAppCode -> {
                         _pairingCode.value = event.code
                         _whatsappStatus.value = "aguardando_codigo"
+                        _message.value = "Código gerado! Digite no WhatsApp."
                     }
                     else -> { }
                 }
@@ -476,7 +481,10 @@ class WhatsAppViewModel @Inject constructor(
             configRepository.getWhatsAppStatus()?.let {
                 _whatsappStatus.value = it.status ?: "desconhecido"
                 _pairingCode.value = it.pairingCode
-                _isConnected.value = it.status in listOf("conectado", "isLogged", "inChat")
+                _isConnected.value = it.status in listOf("conectado", "isLogged")
+                if (it.status == "erro_pareamento" && !it.message.isNullOrBlank()) {
+                    _message.value = it.message
+                }
             }
         }
     }
@@ -494,6 +502,12 @@ class WhatsAppViewModel @Inject constructor(
             val result = configRepository.reconectarWhatsApp(numero)
             result.onSuccess {
                 _whatsappStatus.value = it.status ?: "aguardando_codigo"
+                _isConnected.value = it.status in listOf("conectado", "isLogged")
+                if (it.status == "erro_pareamento") {
+                    _message.value = it.message
+                        ?: "WhatsApp limitou as tentativas. Aguarde cerca de 30 minutos e tente de novo."
+                    return@onSuccess
+                }
                 if (it.pairingCode != null) {
                     _pairingCode.value = it.pairingCode
                     _message.value = "Código gerado! Digite no WhatsApp."
@@ -518,7 +532,13 @@ class WhatsAppViewModel @Inject constructor(
                         _message.value = "Código gerado! Digite no WhatsApp."
                         return@launch
                     }
-                    if (wa.status in listOf("conectado", "isLogged", "inChat")) {
+                    if (wa.status == "erro_pareamento") {
+                        _whatsappStatus.value = "erro_pareamento"
+                        _message.value = wa.message
+                            ?: "WhatsApp limitou as tentativas. Aguarde cerca de 30 minutos e tente de novo."
+                        return@launch
+                    }
+                    if (wa.status in listOf("conectado", "isLogged")) {
                         _isConnected.value = true
                         _message.value = ""
                         return@launch

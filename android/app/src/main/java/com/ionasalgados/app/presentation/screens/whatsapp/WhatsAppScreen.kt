@@ -69,12 +69,24 @@ fun WhatsAppScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             if (message.isNotEmpty()) {
+                val isError = message.contains("limitou", ignoreCase = true)
+                    || message.contains("CompanionHello", ignoreCase = true)
+                    || message.contains("Erro", ignoreCase = true)
+                    || message.contains("Aguarde cerca", ignoreCase = true)
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = IonaCardShape,
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF25D366).copy(alpha = 0.12f))
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isError) Color(0xFFF44336).copy(alpha = 0.12f)
+                        else Color(0xFF25D366).copy(alpha = 0.12f)
+                    )
                 ) {
-                    Text(message, modifier = Modifier.padding(14.dp), color = Color(0xFF128C7E), fontWeight = FontWeight.Medium)
+                    Text(
+                        message,
+                        modifier = Modifier.padding(14.dp),
+                        color = if (isError) Color(0xFFC62828) else Color(0xFF128C7E),
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
 
