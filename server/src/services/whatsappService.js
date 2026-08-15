@@ -294,12 +294,13 @@ function clearRateLimitFile() {
 
 function emitPairingCode(code, phoneNumber) {
   if (!code) return;
-  pairingCode = String(code);
+  pairingCode = String(code).replace(/-/g, '').trim();
   status = 'aguardando_codigo';
   lastError = null;
   clearRateLimitFile();
   console.log('\n========================================');
   console.log('  CÓDIGO WHATSAPP:', pairingCode);
+  console.log('  Digite no celular em até 2 minutos');
   console.log('  WhatsApp > Aparelhos conectados > Conectar aparelho');
   console.log('========================================\n');
   if (io) {
@@ -370,7 +371,11 @@ async function requestPairingCode(phoneNumber) {
     console.log('Aguardando tela de pareamento (QR/auth) ficar pronta...');
     const ready = await waitForAuthReady(45000);
     if (!ready) {
-      console.warn('Tela de pareamento não ficou pronta a tempo');
+      console.warn('Tela de pareamento não ficou pronta — não gerar código manualmente');
+      lastError = 'Tela de pareamento ainda não está pronta. Aguarde alguns segundos e tente de novo.';
+      status = 'aguardando_codigo';
+      if (io) io.emit('statusWhatsApp', getStatus());
+      return null;
     }
 
     if (!client?.page || client.page.isClosed()) return null;
@@ -380,7 +385,8 @@ async function requestPairingCode(phoneNumber) {
         if (!window.WPP?.conn?.genLinkDeviceCodeForPhoneNumber) {
           return { error: 'API genLinkDeviceCodeForPhoneNumber indisponível' };
         }
-        const code = await WPP.conn.genLinkDeviceCodeForPhoneNumber(phone, false);
+        // Mesmo parâmetro do WppConnect nativo (push notification ligado).
+        const code = await WPP.conn.genLinkDeviceCodeForPhoneNumber(phone);
         return { code: code ? String(code) : null };
       } catch (e) {
         const msg = (e && (e.message || (e.toString && e.toString()))) || 'erro desconhecido';
@@ -466,13 +472,14 @@ async function initWhatsApp(socketIo, options = {}) {
   }
 
   try {
-    // NÃO passa phoneNumber aqui — o WppConnect pediria o código sozinho e
-    // nossa ensurePairingCode pediria de novo (2x) → CompanionHelloError/429.
-    // Pedimos o código UMA vez, só depois da tela de auth pronta.
+    // Fluxo nativo do WppConnect: phoneNumber + catchLinkCode geram o código
+    // no momento certo (checkQrCode → loginByCode). NÃO chamar genLinkDeviceCode
+    // manualmente em paralelo — gera código inválido e o celular dá "Não foi possível conectar".
     client = await wppconnect.create({
       session: SESSION_NAME,
       tokenStore: 'file',
       folderNameToken: TOKENS_PATH,
+      phoneNumber,
       headless: true,
       devtools: false,
       useChrome: false,
@@ -556,12 +563,16 @@ async function initWhatsApp(socketIo, options = {}) {
       }
     });
 
+    // Aguarda o catchLinkCode nativo (WppConnect chama loginByCode no momento certo).
     if (status !== 'conectado' && !pairingCode && status !== 'erro_pareamento') {
-      await ensurePairingCode(phoneNumber);
+      await waitForPairingCode(90000);
     }
 
     if (status !== 'conectado' && status !== 'erro_pareamento') {
-      status = 'aguardando_codigo';
+      status = pairingCode ? 'aguardando_codigo' : status;
+      if (!pairingCode && !lastError) {
+        lastError = 'Código ainda não chegou. Aguarde ou toque em Gerar código novamente.';
+      }
     }
 
     console.log('WhatsApp iniciado — aguardando pareamento ou sessão ativa');
