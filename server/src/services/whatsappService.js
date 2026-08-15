@@ -250,8 +250,19 @@ function attachMessageHandler() {
 
 let pairingLock = Promise.resolve();
 let pairingBusy = false;
+let pairingCodeRequested = false;
 let lastError = null;
 let rateLimitedUntil = 0;
+
+function formatPairingCode(code) {
+  const clean = String(code).replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (clean.length === 8) return `${clean.slice(0, 4)}-${clean.slice(4)}`;
+  return clean;
+}
+
+function isWaitingForPairing() {
+  return !!pairingCode || status === 'aguardando_codigo' || pairingCodeRequested;
+}
 
 function loadRateLimit() {
   try {
@@ -294,13 +305,16 @@ function clearRateLimitFile() {
 
 function emitPairingCode(code, phoneNumber) {
   if (!code) return;
-  pairingCode = String(code).replace(/-/g, '').trim();
+  if (pairingCode) {
+    console.log(`Código extra ignorado (${code}) — ativo: ${pairingCode}`);
+    return;
+  }
+  pairingCode = formatPairingCode(code);
   status = 'aguardando_codigo';
   lastError = null;
-  clearRateLimitFile();
   console.log('\n========================================');
   console.log('  CÓDIGO WHATSAPP:', pairingCode);
-  console.log('  Digite no celular em até 2 minutos');
+  console.log('  Digite no celular em até 2 minutos (não gere outro código)');
   console.log('  WhatsApp > Aparelhos conectados > Conectar aparelho');
   console.log('========================================\n');
   if (io) {
@@ -360,32 +374,38 @@ async function waitForAuthReady(timeoutMs = 45000) {
 }
 
 async function requestPairingCode(phoneNumber) {
-  if (!client?.page || !phoneNumber || pairingCode) return pairingCode;
+  if (!client?.page || !phoneNumber || pairingCode || pairingCodeRequested) return pairingCode;
   if (client.page.isClosed()) return null;
   if (isRateLimited()) {
     applyRateLimitedStatus();
     return null;
   }
 
+  pairingCodeRequested = true;
+
   try {
     console.log('Aguardando tela de pareamento (QR/auth) ficar pronta...');
-    const ready = await waitForAuthReady(45000);
+    const ready = await waitForAuthReady(60000);
     if (!ready) {
-      console.warn('Tela de pareamento não ficou pronta — não gerar código manualmente');
-      lastError = 'Tela de pareamento ainda não está pronta. Aguarde alguns segundos e tente de novo.';
+      pairingCodeRequested = false;
+      console.warn('Tela de pareamento não ficou pronta — abortando geração do código');
+      lastError = 'Tela de pareamento ainda não está pronta. Aguarde 1 minuto e tente de novo.';
       status = 'aguardando_codigo';
       if (io) io.emit('statusWhatsApp', getStatus());
       return null;
     }
 
-    if (!client?.page || client.page.isClosed()) return null;
+    if (!client?.page || client.page.isClosed()) {
+      pairingCodeRequested = false;
+      return null;
+    }
 
+    console.log('Gerando código de pareamento (uma única vez)...');
     const result = await client.page.evaluate(async (phone) => {
       try {
         if (!window.WPP?.conn?.genLinkDeviceCodeForPhoneNumber) {
           return { error: 'API genLinkDeviceCodeForPhoneNumber indisponível' };
         }
-        // Mesmo parâmetro do WppConnect nativo (push notification ligado).
         const code = await WPP.conn.genLinkDeviceCodeForPhoneNumber(phone);
         return { code: code ? String(code) : null };
       } catch (e) {
@@ -398,6 +418,7 @@ async function requestPairingCode(phoneNumber) {
     }, phoneNumber);
 
     if (result?.error) {
+      pairingCodeRequested = false;
       console.error('Erro ao gerar código de pareamento:', result.error, result.raw || '');
       const blob = `${result.error} ${result.raw || ''}`.toLowerCase();
       if (blob.includes('companionhello') || blob.includes('rate-overlimit') || blob.includes('429')) {
@@ -413,9 +434,11 @@ async function requestPairingCode(phoneNumber) {
       emitPairingCode(result.code, phoneNumber);
       return pairingCode;
     }
+    pairingCodeRequested = false;
     console.warn('genLinkDeviceCodeForPhoneNumber retornou vazio');
     return null;
   } catch (err) {
+    pairingCodeRequested = false;
     console.error('Erro ao gerar código de pareamento:', err.message || err);
     const blob = String(err.message || err).toLowerCase();
     if (blob.includes('companionhello') || blob.includes('rate-overlimit') || blob.includes('429')) {
@@ -426,7 +449,7 @@ async function requestPairingCode(phoneNumber) {
 }
 
 function ensurePairingCode(phoneNumber) {
-  if (!phoneNumber || pairingCode || status === 'conectado' || pairingBusy) {
+  if (!phoneNumber || pairingCode || pairingCodeRequested || status === 'conectado' || pairingBusy) {
     return Promise.resolve(pairingCode);
   }
   if (isRateLimited()) {
@@ -472,14 +495,14 @@ async function initWhatsApp(socketIo, options = {}) {
   }
 
   try {
-    // Fluxo nativo do WppConnect: phoneNumber + catchLinkCode geram o código
-    // no momento certo (checkQrCode → loginByCode). NÃO chamar genLinkDeviceCode
-    // manualmente em paralelo — gera código inválido e o celular dá "Não foi possível conectar".
+    // NÃO passar phoneNumber no create — bug do WppConnect: loginByCode roda
+    // várias vezes e invalida o código antes de digitar no celular.
+    // Geramos UMA vez via ensurePairingCode após a tela de auth pronta.
     client = await wppconnect.create({
       session: SESSION_NAME,
       tokenStore: 'file',
       folderNameToken: TOKENS_PATH,
-      phoneNumber,
+      whatsappVersion: '2.3000.1045290919-alpha',
       headless: true,
       devtools: false,
       useChrome: false,
@@ -499,14 +522,23 @@ async function initWhatsApp(socketIo, options = {}) {
         '--disable-gpu'
       ],
       catchLinkCode: (code) => {
-        emitPairingCode(code, phoneNumber);
+        // Ignorado de propósito — evita sobrescrever o código único.
+        if (!pairingCode) console.log('catchLinkCode ignorado (fluxo manual único):', code);
       },
       statusFind: (statusSession) => {
         console.log('Status WhatsApp:', statusSession);
 
+        if (statusSession === 'browserClose' && isWaitingForPairing()) {
+          lastError = 'Sessão de pareamento fechou no servidor. Gere um novo código.';
+          status = 'erro_pareamento';
+          if (io) io.emit('statusWhatsApp', getStatus());
+          return;
+        }
+
         if (['isLogged', 'qrReadSuccess', 'chatsAvailable'].includes(statusSession)) {
           status = 'conectado';
           pairingCode = null;
+          pairingCodeRequested = false;
           lastError = null;
           clearRateLimitFile();
           whatsappBot.init(client, io);
@@ -558,20 +590,19 @@ async function initWhatsApp(socketIo, options = {}) {
           if (io) io.emit('statusWhatsApp', getStatus());
         }
       }
-      if (state === 'CONFLICT' && !isRateLimited()) {
+      if (state === 'CONFLICT' && !isRateLimited() && !isWaitingForPairing()) {
         scheduleReconnect();
       }
     });
 
-    // Aguarda o catchLinkCode nativo (WppConnect chama loginByCode no momento certo).
     if (status !== 'conectado' && !pairingCode && status !== 'erro_pareamento') {
-      await waitForPairingCode(90000);
+      await ensurePairingCode(phoneNumber);
     }
 
     if (status !== 'conectado' && status !== 'erro_pareamento') {
       status = pairingCode ? 'aguardando_codigo' : status;
       if (!pairingCode && !lastError) {
-        lastError = 'Código ainda não chegou. Aguarde ou toque em Gerar código novamente.';
+        lastError = 'Código ainda não chegou. Aguarde 1 minuto e tente de novo.';
       }
     }
 
@@ -598,7 +629,7 @@ async function initWhatsApp(socketIo, options = {}) {
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer || initializing || isRateLimited()) return;
+  if (reconnectTimer || initializing || isRateLimited() || isWaitingForPairing()) return;
   reconnectTimer = setTimeout(async () => {
     reconnectTimer = null;
     if (isRateLimited()) return;
@@ -660,6 +691,7 @@ async function reconectar(telefone) {
   initializing = true;
   initializingSince = Date.now();
   pairingCode = null;
+  pairingCodeRequested = false;
   lastError = null;
   status = 'reconectando';
   if (io) io.emit('statusWhatsApp', getStatus());
@@ -734,6 +766,7 @@ async function desconectar() {
   }
   initializing = false;
   pairingCode = null;
+  pairingCodeRequested = false;
 
   // Fecha sem logout longo (logout costuma travar). Apaga a sessão local
   // para o próximo "Gerar código" sempre pedir pareamento novo.
