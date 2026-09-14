@@ -305,16 +305,15 @@ function clearRateLimitFile() {
 
 function emitPairingCode(code, phoneNumber) {
   if (!code) return;
-  if (pairingCode) {
-    console.log(`Código extra ignorado (${code}) — ativo: ${pairingCode}`);
-    return;
-  }
-  pairingCode = formatPairingCode(code);
+  const formatted = formatPairingCode(code);
+  if (formatted === pairingCode) return;
+  pairingCode = formatted;
+  pairingCodeRequested = true;
   status = 'aguardando_codigo';
   lastError = null;
   console.log('\n========================================');
   console.log('  CÓDIGO WHATSAPP:', pairingCode);
-  console.log('  Digite no celular em até 2 minutos (não gere outro código)');
+  console.log('  Digite AGORA no celular (o código muda a cada ~20s)');
   console.log('  WhatsApp > Aparelhos conectados > Conectar aparelho');
   console.log('========================================\n');
   if (io) {
@@ -495,8 +494,8 @@ async function initWhatsApp(socketIo, options = {}) {
   }
 
   try {
-    // O patch pós-instalação do WppConnect garante que loginByCode rode uma vez
-    // por sessão. Assim o código exibido permanece válido até o cliente digitá-lo.
+    // Patch: grava urlCode antes do loginByCode (evita loop 429).
+    // catchLinkCode atualiza o código no app a cada QR (~20s).
     client = await wppconnect.create({
       session: SESSION_NAME,
       tokenStore: 'file',

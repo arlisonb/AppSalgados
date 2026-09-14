@@ -1,7 +1,10 @@
 /*
- * WPPConnect 2.2.x regenerates the link-by-phone code whenever WhatsApp Web
- * rotates its QR. That invalidates the code while the customer is typing it.
- * Keep one code per unpaired browser session until upstream releases the fix.
+ * Bug do WppConnect 2.2.x: com phoneNumber, loginByCode retorna ANTES de
+ * gravar this.urlCode. checkQrCode acha que o QR mudou sempre e dispara
+ * genLinkDeviceCode em loop (429 / código inválido).
+ *
+ * Correção: gravar urlCode antes de pedir o código. Assim cada QR gera
+ * UM código novo e o app pode mostrar o código ainda válido.
  */
 const fs = require('fs');
 const path = require('path');
@@ -24,21 +27,31 @@ if (!fs.existsSync(file)) {
 }
 
 let source = fs.readFileSync(file, 'utf8');
-if (source.includes('this.linkCodeIssued')) {
-  console.log('[patch-wppconnect] Patch de código digitável já aplicado.');
+
+if (source.includes('pairingUrlCodeFix')) {
+  console.log('[patch-wppconnect] Patch de urlCode já aplicado.');
   process.exit(0);
 }
 
-const resetNeedle = 'if (!needScan) {\n            this.attempt = 0;\n            return;\n        }';
-const resetReplacement = 'if (!needScan) {\n            this.attempt = 0;\n            this.linkCodeIssued = false;\n            return;\n        }';
-const linkNeedle = "if (typeof this.options.phoneNumber === 'string') {\n            return this.loginByCode(this.options.phoneNumber);\n        }";
-const linkReplacement = "if (typeof this.options.phoneNumber === 'string') {\n            if (this.linkCodeIssued) {\n                return;\n            }\n            this.linkCodeIssued = true;\n            return this.loginByCode(this.options.phoneNumber);\n        }";
+// Remove o patch antigo (linkCodeIssued), se existir.
+source = source
+  .replace(/\s*this\.linkCodeIssued = false;\n/, '\n')
+  .replace(
+    /if \(typeof this\.options\.phoneNumber === 'string'\) \{\s*if \(this\.linkCodeIssued\) \{\s*return;\s*\}\s*this\.linkCodeIssued = true;\s*return this\.loginByCode\(this\.options\.phoneNumber\);\s*\}/,
+    "if (typeof this.options.phoneNumber === 'string') {\n            return this.loginByCode(this.options.phoneNumber);\n        }"
+  );
 
-if (!source.includes(resetNeedle) || !source.includes(linkNeedle)) {
+const needle =
+  "if (!result?.urlCode || this.urlCode === result.urlCode) {\n            return;\n        }\n        if (typeof this.options.phoneNumber === 'string') {\n            return this.loginByCode(this.options.phoneNumber);\n        }\n        this.urlCode = result.urlCode;\n        this.attempt++;";
+
+const replacement =
+  "if (!result?.urlCode || this.urlCode === result.urlCode) {\n            return;\n        }\n        // pairingUrlCodeFix: grava o QR atual ANTES do loginByCode\n        this.urlCode = result.urlCode;\n        this.attempt++;\n        if (typeof this.options.phoneNumber === 'string') {\n            return this.loginByCode(this.options.phoneNumber);\n        }";
+
+if (!source.includes(needle)) {
   console.warn('[patch-wppconnect] Estrutura inesperada; patch não aplicado.');
   process.exit(0);
 }
 
-source = source.replace(resetNeedle, resetReplacement).replace(linkNeedle, linkReplacement);
+source = source.replace(needle, replacement);
 fs.writeFileSync(file, source);
-console.log('[patch-wppconnect] Código digitável estabilizado.');
+console.log('[patch-wppconnect] urlCode gravado antes do código digitável.');

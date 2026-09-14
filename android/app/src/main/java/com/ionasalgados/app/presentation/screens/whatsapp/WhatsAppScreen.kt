@@ -166,7 +166,7 @@ fun WhatsAppScreen(
                             }
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                "WhatsApp → Aparelhos conectados → Conectar aparelho → Digite o código",
+                                "Abra o WhatsApp do número cadastrado e cole o código em até 20 segundos. Se o código no app mudar, use o novo.",
                                 style = MaterialTheme.typography.bodySmall,
                                 textAlign = TextAlign.Center,
                                 color = MarromSuave.copy(alpha = 0.7f),

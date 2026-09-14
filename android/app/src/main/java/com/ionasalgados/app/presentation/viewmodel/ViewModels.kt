@@ -460,7 +460,7 @@ class WhatsAppViewModel @Inject constructor(
                     is SocketEvent.WhatsAppCode -> {
                         _pairingCode.value = event.code
                         _whatsappStatus.value = "aguardando_codigo"
-                        _message.value = "Código gerado! Digite no WhatsApp em até 2 minutos."
+                        _message.value = "Código gerado! Digite AGORA no WhatsApp — ele muda a cada ~20 segundos."
                     }
                     else -> { }
                 }
@@ -510,7 +510,7 @@ class WhatsAppViewModel @Inject constructor(
                 }
                 if (it.pairingCode != null) {
                     _pairingCode.value = it.pairingCode
-                    _message.value = "Código gerado! Digite no WhatsApp em até 2 minutos."
+                    _message.value = "Código gerado! Digite AGORA no WhatsApp — ele muda a cada ~20 segundos."
                 } else {
                     aguardarCodigo()
                 }
@@ -529,7 +529,7 @@ class WhatsAppViewModel @Inject constructor(
                     if (!wa.pairingCode.isNullOrBlank()) {
                         _pairingCode.value = wa.pairingCode
                         _whatsappStatus.value = "aguardando_codigo"
-                        _message.value = "Código gerado! Digite no WhatsApp em até 2 minutos."
+                        _message.value = "Código gerado! Digite AGORA no WhatsApp — ele muda a cada ~20 segundos."
                         return@launch
                     }
                     if (wa.status == "erro_pareamento") {
