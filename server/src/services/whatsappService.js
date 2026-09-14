@@ -16,6 +16,7 @@ let initializingSince = 0;
 let listenersClient = null;
 let pollTimer = null;
 let pollInitialized = false;
+let loginWatchTimer = null;
 const processedMsgIds = new Set();
 const lastSeenTimeByChat = new Map();
 
@@ -99,6 +100,7 @@ function withTimeout(promise, ms, label) {
 // Fecha o cliente atual sem nunca travar. clearBrowserLock() em seguida
 // garante que o processo do navegador realmente morra.
 async function closeClientSafe(useLogout) {
+  stopLoginWatchdog();
   stopMessagePolling();
   listenersClient = null;
   pollInitialized = false;
@@ -134,6 +136,61 @@ function shouldSkipProcessed(message) {
   return false;
 }
 
+function markConnected(reason) {
+  console.log('WhatsApp conectado:', reason);
+  status = 'conectado';
+  pairingCode = null;
+  pairingCodeRequested = false;
+  lastError = null;
+  clearRateLimitFile();
+  stopLoginWatchdog();
+  whatsappBot.init(client, io);
+  attachMessageHandler();
+  if (io) io.emit('statusWhatsApp', getStatus());
+}
+
+async function isClientLogged() {
+  if (!client) return false;
+  try {
+    if (typeof client.isAuthenticated === 'function' && await client.isAuthenticated()) return true;
+  } catch (_) { }
+  try {
+    if (typeof client.isMainReady === 'function' && await client.isMainReady()) return true;
+  } catch (_) { }
+  try {
+    if (client.page && !client.page.isClosed()) {
+      return await client.page.evaluate(() => {
+        try {
+          return !!(window.WPP?.conn?.isRegistered?.() || window.WPP?.conn?.isAuthenticated?.());
+        } catch (_) {
+          return false;
+        }
+      });
+    }
+  } catch (_) { }
+  return false;
+}
+
+function startLoginWatchdog() {
+  if (loginWatchTimer || status === 'conectado') return;
+  console.log('Watchdog de login WhatsApp ativo');
+  loginWatchTimer = setInterval(async () => {
+    if (!client || status === 'conectado') {
+      stopLoginWatchdog();
+      return;
+    }
+    if (await isClientLogged()) {
+      markConnected('watchdog');
+    }
+  }, 3000);
+}
+
+function stopLoginWatchdog() {
+  if (!loginWatchTimer) return;
+  clearInterval(loginWatchTimer);
+  loginWatchTimer = null;
+}
+
 async function processIncomingMessage(message, source = 'event') {
   if (message.isNewMsg === false && source === 'event') return;
   if (shouldSkipProcessed(message)) return;
@@ -160,7 +217,11 @@ async function processIncomingMessage(message, source = 'event') {
 }
 
 async function pollIncomingMessages() {
-  if (!client || status !== 'conectado') return;
+  if (!client) return;
+  if (status !== 'conectado') {
+    if (await isClientLogged()) markConnected('poll-auth');
+    else return;
+  }
 
   let chats = [];
   try {
@@ -540,27 +601,26 @@ async function initWhatsApp(socketIo, options = {}) {
         }
 
         if (['isLogged', 'qrReadSuccess', 'chatsAvailable'].includes(statusSession)) {
-          status = 'conectado';
-          pairingCode = null;
-          pairingCodeRequested = false;
-          lastError = null;
-          clearRateLimitFile();
-          whatsappBot.init(client, io);
-          attachMessageHandler();
-          if (io) io.emit('statusWhatsApp', getStatus());
+          markConnected(statusSession);
           return;
         }
 
         if (statusSession === 'inChat') {
-          if (status === 'conectado') {
+          isClientLogged().then((logged) => {
+            if (logged) {
+              markConnected('inChat');
+              return;
+            }
+            if (status === 'conectado') {
+              attachMessageHandler();
+              if (io) io.emit('statusWhatsApp', getStatus());
+              return;
+            }
+            if (status !== 'erro_pareamento') {
+              status = pairingCode ? 'aguardando_codigo' : status;
+            }
             if (io) io.emit('statusWhatsApp', getStatus());
-            return;
-          }
-          // inChat prematuro com sessão unpaired — NÃO marcar como conectado
-          if (status !== 'erro_pareamento') {
-            status = 'aguardando_codigo';
-          }
-          if (io) io.emit('statusWhatsApp', getStatus());
+          }).catch(() => { });
           return;
         }
 
@@ -583,14 +643,14 @@ async function initWhatsApp(socketIo, options = {}) {
 
     client.onStateChange((state) => {
       console.log('Estado WhatsApp:', state);
-      if (state === 'CONNECTED' && status === 'conectado') {
-        whatsappBot.init(client, io);
-        attachMessageHandler();
+      if (state === 'CONNECTED') {
+        markConnected('CONNECTED');
       }
       if (state === 'UNPAIRED' || state === 'UNLAUNCHED') {
         if (status === 'conectado') {
           status = 'aguardando_codigo';
           pairingCode = null;
+          pairingCodeRequested = false;
           if (io) io.emit('statusWhatsApp', getStatus());
         }
       }
@@ -604,6 +664,7 @@ async function initWhatsApp(socketIo, options = {}) {
       if (!pairingCode && !lastError) {
         lastError = 'Código ainda não chegou. Aguarde 1 minuto e tente de novo.';
       }
+      startLoginWatchdog();
     }
 
     console.log('WhatsApp iniciado — aguardando pareamento ou sessão ativa');
