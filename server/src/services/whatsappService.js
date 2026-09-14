@@ -495,14 +495,13 @@ async function initWhatsApp(socketIo, options = {}) {
   }
 
   try {
-    // NÃO passar phoneNumber no create — bug do WppConnect: loginByCode roda
-    // várias vezes e invalida o código antes de digitar no celular.
-    // Geramos UMA vez via ensurePairingCode após a tela de auth pronta.
+    // O patch pós-instalação do WppConnect garante que loginByCode rode uma vez
+    // por sessão. Assim o código exibido permanece válido até o cliente digitá-lo.
     client = await wppconnect.create({
       session: SESSION_NAME,
       tokenStore: 'file',
       folderNameToken: TOKENS_PATH,
-      whatsappVersion: '2.3000.1045290919-alpha',
+      phoneNumber,
       headless: true,
       devtools: false,
       useChrome: false,
@@ -522,8 +521,7 @@ async function initWhatsApp(socketIo, options = {}) {
         '--disable-gpu'
       ],
       catchLinkCode: (code) => {
-        // Ignorado de propósito — evita sobrescrever o código único.
-        if (!pairingCode) console.log('catchLinkCode ignorado (fluxo manual único):', code);
+        emitPairingCode(code, phoneNumber);
       },
       statusFind: (statusSession) => {
         console.log('Status WhatsApp:', statusSession);
@@ -594,10 +592,6 @@ async function initWhatsApp(socketIo, options = {}) {
         scheduleReconnect();
       }
     });
-
-    if (status !== 'conectado' && !pairingCode && status !== 'erro_pareamento') {
-      await ensurePairingCode(phoneNumber);
-    }
 
     if (status !== 'conectado' && status !== 'erro_pareamento') {
       status = pairingCode ? 'aguardando_codigo' : status;

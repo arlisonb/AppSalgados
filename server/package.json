@@ -4,6 +4,7 @@
   "description": "Servidor de gerenciamento de pedidos - Iona Salgados",
   "main": "src/index.js",
   "scripts": {
+    "postinstall": "node scripts/patch-wppconnect-pairing.js",
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
     "init-db": "node src/database/init.js"
