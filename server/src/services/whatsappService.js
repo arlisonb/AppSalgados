@@ -306,14 +306,19 @@ function clearRateLimitFile() {
 function emitPairingCode(code, phoneNumber) {
   if (!code) return;
   const formatted = formatPairingCode(code);
-  if (formatted === pairingCode) return;
+  if (pairingCode) {
+    if (formatted !== pairingCode) {
+      console.log(`Código extra ignorado (${formatted}) — ativo: ${pairingCode}`);
+    }
+    return;
+  }
   pairingCode = formatted;
   pairingCodeRequested = true;
   status = 'aguardando_codigo';
   lastError = null;
   console.log('\n========================================');
   console.log('  CÓDIGO WHATSAPP:', pairingCode);
-  console.log('  Digite AGORA no celular (o código muda a cada ~20s)');
+  console.log('  Digite no celular em até 2 minutos (não gere outro código)');
   console.log('  WhatsApp > Aparelhos conectados > Conectar aparelho');
   console.log('========================================\n');
   if (io) {
@@ -494,13 +499,15 @@ async function initWhatsApp(socketIo, options = {}) {
   }
 
   try {
-    // Patch: grava urlCode antes do loginByCode (evita loop 429).
-    // catchLinkCode atualiza o código no app a cada QR (~20s).
+    // Patch pós-install: um código por sessão. Sem isso o QR rotaciona
+    // a cada ~20s e o celular rejeita o código que o cliente está digitando.
     client = await wppconnect.create({
       session: SESSION_NAME,
       tokenStore: 'file',
       folderNameToken: TOKENS_PATH,
       phoneNumber,
+      whatsappVersion: '2.3000.1046596687-alpha',
+      deviceName: 'Iona Salgados',
       headless: true,
       devtools: false,
       useChrome: false,

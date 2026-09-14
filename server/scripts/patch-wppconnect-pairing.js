@@ -1,10 +1,9 @@
 /*
- * Bug do WppConnect 2.2.x: com phoneNumber, loginByCode retorna ANTES de
- * gravar this.urlCode. checkQrCode acha que o QR mudou sempre e dispara
- * genLinkDeviceCode em loop (429 / código inválido).
- *
- * Correção: gravar urlCode antes de pedir o código. Assim cada QR gera
- * UM código novo e o app pode mostrar o código ainda válido.
+ * WppConnect 2.2.x + código digitável:
+ * 1) loginByCode rodava em loop no mesmo QR (429) porque urlCode só era
+ *    gravado DEPOIS. Corrigimos gravando urlCode antes.
+ * 2) Cada rotação de QR (~20s) pedia um código NOVO e invalidava o que
+ *    o cliente estava digitando. Depois do primeiro código, não gera mais.
  */
 const fs = require('fs');
 const path = require('path');
@@ -27,31 +26,66 @@ if (!fs.existsSync(file)) {
 }
 
 let source = fs.readFileSync(file, 'utf8');
-
-if (source.includes('pairingUrlCodeFix')) {
-  console.log('[patch-wppconnect] Patch de urlCode já aplicado.');
+if (source.includes('pairingCodeOnceFix')) {
+  console.log('[patch-wppconnect] Patch de código único já aplicado.');
   process.exit(0);
 }
 
-// Remove o patch antigo (linkCodeIssued), se existir.
-source = source
-  .replace(/\s*this\.linkCodeIssued = false;\n/, '\n')
-  .replace(
-    /if \(typeof this\.options\.phoneNumber === 'string'\) \{\s*if \(this\.linkCodeIssued\) \{\s*return;\s*\}\s*this\.linkCodeIssued = true;\s*return this\.loginByCode\(this\.options\.phoneNumber\);\s*\}/,
-    "if (typeof this.options.phoneNumber === 'string') {\n            return this.loginByCode(this.options.phoneNumber);\n        }"
-  );
+const loginBlock = `if (typeof this.options.phoneNumber === 'string') {
+            if (this.linkCodeIssued) {
+                return;
+            }
+            this.linkCodeIssued = true;
+            return this.loginByCode(this.options.phoneNumber);
+        }`;
 
-const needle =
-  "if (!result?.urlCode || this.urlCode === result.urlCode) {\n            return;\n        }\n        if (typeof this.options.phoneNumber === 'string') {\n            return this.loginByCode(this.options.phoneNumber);\n        }\n        this.urlCode = result.urlCode;\n        this.attempt++;";
+const onceBlock = `if (!result?.urlCode || this.urlCode === result.urlCode) {
+            return;
+        }
+        // pairingCodeOnceFix: um código por sessão unpaired
+        this.urlCode = result.urlCode;
+        this.attempt++;
+        ${loginBlock}`;
 
-const replacement =
-  "if (!result?.urlCode || this.urlCode === result.urlCode) {\n            return;\n        }\n        // pairingUrlCodeFix: grava o QR atual ANTES do loginByCode\n        this.urlCode = result.urlCode;\n        this.attempt++;\n        if (typeof this.options.phoneNumber === 'string') {\n            return this.loginByCode(this.options.phoneNumber);\n        }";
+const variants = [
+  `if (!result?.urlCode || this.urlCode === result.urlCode) {
+            return;
+        }
+        // pairingUrlCodeFix: grava o QR atual ANTES do loginByCode
+        this.urlCode = result.urlCode;
+        this.attempt++;
+        if (typeof this.options.phoneNumber === 'string') {
+            return this.loginByCode(this.options.phoneNumber);
+        }`,
+  `if (!result?.urlCode || this.urlCode === result.urlCode) {
+            return;
+        }
+        if (typeof this.options.phoneNumber === 'string') {
+            return this.loginByCode(this.options.phoneNumber);
+        }
+        this.urlCode = result.urlCode;
+        this.attempt++;`
+];
 
-if (!source.includes(needle)) {
+let applied = false;
+for (const variant of variants) {
+  if (source.includes(variant)) {
+    source = source.replace(variant, onceBlock);
+    applied = true;
+    break;
+  }
+}
+
+if (!applied) {
   console.warn('[patch-wppconnect] Estrutura inesperada; patch não aplicado.');
   process.exit(0);
 }
 
-source = source.replace(needle, replacement);
+const resetNeedle = 'if (!needScan) {\n            this.attempt = 0;\n            return;\n        }';
+const resetReplacement = 'if (!needScan) {\n            this.attempt = 0;\n            this.linkCodeIssued = false;\n            return;\n        }';
+if (source.includes(resetNeedle) && !source.includes('this.linkCodeIssued = false')) {
+  source = source.replace(resetNeedle, resetReplacement);
+}
+
 fs.writeFileSync(file, source);
-console.log('[patch-wppconnect] urlCode gravado antes do código digitável.');
+console.log('[patch-wppconnect] Código digitável único aplicado.');
