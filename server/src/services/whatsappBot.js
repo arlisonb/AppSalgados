@@ -25,6 +25,9 @@ const ESTADOS = {
   CONFIRMAR_DADOS: 'confirmar_dados'
 };
 
+const INATIVIDADE_MS = 2 * 60 * 1000;
+const inactivityTimers = new Map();
+
 function init(client, socketIo) {
   whatsappClient = client;
   io = socketIo;
@@ -44,6 +47,63 @@ function resolveSessionKey(telefone, chatId) {
   if (normalizedChatId && isChatIdValido(normalizedChatId)) return normalizedChatId;
   const clean = normalizePhoneKey(telefone);
   return clean ? `${clean}@c.us` : null;
+}
+
+function sessaoTemProgresso(sessao) {
+  const d = sessao?.dados || {};
+  if (Array.isArray(d.carrinho) && d.carrinho.length > 0) return true;
+  if (d.aguardando_item != null) return true;
+  if (sessao?.estado && sessao.estado !== ESTADOS.ESCOLHENDO_ITENS) return true;
+  return false;
+}
+
+function clearInactivityTimer(telefone, chatId) {
+  const key = resolveSessionKey(telefone, chatId);
+  if (!key) return;
+  const entry = inactivityTimers.get(key);
+  if (entry?.timeoutId) clearTimeout(entry.timeoutId);
+  inactivityTimers.delete(key);
+}
+
+async function resetPorInatividade(telefone, chatId) {
+  const chatIdNorm = normalizeChatId(chatId);
+  const sessao = getSessao(telefone, chatIdNorm);
+  if (sessao.estado === ESTADOS.CONFIRMAR_ENTREGA) return;
+  if (!sessaoTemProgresso(sessao)) return;
+
+  const tel = String(telefone || '').replace(/\D/g, '');
+  const chat = chatIdNorm || sessao.dados?.chat_id || getChatId(tel, sessao.dados);
+  console.log(`Atendimento WhatsApp reiniciado por inatividade: ${chat || tel}`);
+
+  clearInactivityTimer(telefone, chatIdNorm);
+  const dadosLimpos = { chat_id: chat, carrinho: [] };
+  await iniciarCardapio(tel, dadosLimpos, chat, {
+    omitirSaudacao: true,
+    prefixo: '⏱️ *Atendimento reiniciado* — ficamos 2 minutos sem sua resposta.\n\nSeu carrinho foi esvaziado.'
+  });
+}
+
+function touchInactivityTimer(telefone, chatId) {
+  const key = resolveSessionKey(telefone, chatId);
+  if (!key) return;
+
+  const sessao = getSessao(telefone, chatId);
+  if (sessao.estado === ESTADOS.CONFIRMAR_ENTREGA) {
+    clearInactivityTimer(telefone, chatId);
+    return;
+  }
+
+  clearInactivityTimer(telefone, chatId);
+
+  const timeoutId = setTimeout(() => {
+    inactivityTimers.delete(key);
+    resetPorInatividade(telefone, chatId).catch((err) => {
+      console.error('Erro ao reiniciar atendimento por inatividade:', err.message);
+    });
+  }, INATIVIDADE_MS);
+  if (typeof timeoutId.unref === 'function') timeoutId.unref();
+
+  inactivityTimers.set(key, { timeoutId, telefone, chatId });
 }
 
 function getSessaoPendenteEntrega(telefone, chatId) {
@@ -585,8 +645,9 @@ async function handleConfirmarDados(tel, texto, dados, chatId) {
 
 async function iniciarCardapio(tel, dados, chatId, opts = {}) {
   const { texto } = getCardapioNumerado({ omitirSaudacao: opts.omitirSaudacao });
+  const prefixo = opts.prefixo ? `${opts.prefixo}\n\n` : '';
   setSessao(tel, ESTADOS.ESCOLHENDO_ITENS, { ...dados, carrinho: dados.carrinho || [] }, chatId);
-  await enviarMensagem(tel, texto, chatId);
+  await enviarMensagem(tel, `${prefixo}${texto}`, chatId);
 }
 
 function isSaudacao(texto) {
@@ -623,7 +684,9 @@ async function processarMensagem(telefone, mensagem, chatId) {
 
   salvarMensagem(tel || chatIdNorm, 'entrada', mensagem, dados.cliente_id);
 
+  try {
   if (isSaudacao(textoLower) && podeReiniciarPorSaudacao(sessao)) {
+    clearInactivityTimer(tel, chatIdNorm);
     await iniciarAtendimento(tel, { chat_id: chatIdNorm, carrinho: [] }, chatIdNorm);
     return;
   }
@@ -664,6 +727,9 @@ async function processarMensagem(telefone, mensagem, chatId) {
       break;
     default:
       await iniciarCardapio(tel, dados, chatIdNorm);
+  }
+  } finally {
+    touchInactivityTimer(tel, chatIdNorm);
   }
 }
 
@@ -861,8 +927,10 @@ async function handleConfirmar(tel, opcao, dados, chatId) {
       );
     }
 
+    clearInactivityTimer(tel, chatId);
     setSessao(tel, ESTADOS.ESCOLHENDO_ITENS, { chat_id: dados.chat_id, carrinho: [] }, chatId);
   } else if (opcao === '2') {
+    clearInactivityTimer(tel, chatId);
     setSessao(tel, ESTADOS.ESCOLHENDO_ITENS, { chat_id: dados.chat_id, carrinho: [] }, chatId);
     await enviarMensagem(tel, 'Pedido cancelado. Digite *OI* para fazer um novo pedido.', chatId);
   } else {
@@ -902,6 +970,7 @@ async function criarPedido(tel, dados, chatId, formaPagamento) {
 
 function iniciarConfirmacaoEntrega(telefone, pedido, chatId, socketIo) {
   if (socketIo) io = socketIo;
+  clearInactivityTimer(telefone, chatId);
   setSessao(telefone, ESTADOS.CONFIRMAR_ENTREGA, {
     pedido_id: pedido.id,
     pedido_numero: pedido.numero,
