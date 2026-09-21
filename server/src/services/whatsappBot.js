@@ -15,6 +15,8 @@ const ESTADOS = {
   ESCOLHENDO_ITENS: 'escolhendo_itens',
   ESCOLHER_ENTREGA: 'escolher_entrega',
   ESCOLHER_PAGAMENTO: 'escolher_pagamento',
+  ESCOLHER_TROCO: 'escolher_troco',
+  VALOR_DINHEIRO: 'valor_dinheiro',
   PEDIDO_NOME: 'pedido_nome',
   PEDIDO_ENDERECO: 'pedido_endereco',
   PEDIDO_TELEFONE: 'pedido_telefone',
@@ -161,6 +163,17 @@ function emojiNumero(n) {
 
 function fmtMoeda(valor) {
   return `R$ ${valor.toFixed(2).replace('.', ',')}`;
+}
+
+function parseValorMonetario(texto) {
+  let s = String(texto || '').trim().replace(/[^\d,.]/g, '');
+  if (!s) return null;
+  if (s.includes(',')) {
+    s = s.replace(/\./g, '').replace(',', '.');
+  }
+  const v = parseFloat(s);
+  if (!Number.isFinite(v) || v <= 0) return null;
+  return Math.round(v * 100) / 100;
 }
 
 function formatPrecos(p) {
@@ -316,6 +329,8 @@ async function finalizarPedido(tel, dados, carrinho, chatId) {
   dados.carrinho = carrinho;
   delete dados.tipo_entrega;
   delete dados.forma_pagamento;
+  delete dados.troco;
+  delete dados.valor_pago_dinheiro;
   setSessao(tel, ESTADOS.ESCOLHER_ENTREGA, dados, chatId);
 
   const enderecoLoja = getEnderecoLoja();
@@ -416,6 +431,12 @@ async function irParaEscolherPagamento(tel, dados, chatId) {
   await enviarMensagem(tel, texto, chatId);
 }
 
+async function irParaConfirmarPedido(tel, dados, chatId) {
+  setSessao(tel, ESTADOS.CONFIRMAR, dados, chatId);
+  await enviarResumo(tel, dados, chatId);
+  await enviarMensagem(tel, '✅ *Confirma o pedido?*\n\n1️⃣ Sim\n2️⃣ Não', chatId);
+}
+
 async function handleEscolherPagamento(tel, texto, dados, chatId) {
   const opcao = normalizarTextoPedido(texto).replace(/\D/g, '');
   const temPix = !!(configRepo.getConfig('pix') || '').trim();
@@ -426,16 +447,81 @@ async function handleEscolherPagamento(tel, texto, dados, chatId) {
       return;
     }
     dados.forma_pagamento = 'PIX';
-  } else if (opcao === '2') {
-    dados.forma_pagamento = 'Dinheiro';
-  } else {
-    await enviarMensagem(tel, 'Escolha *1️⃣ PIX* ou *2️⃣ Dinheiro*', chatId);
+    delete dados.troco;
+    delete dados.valor_pago_dinheiro;
+    await irParaConfirmarPedido(tel, dados, chatId);
     return;
   }
 
-  setSessao(tel, ESTADOS.CONFIRMAR, dados, chatId);
-  await enviarResumo(tel, dados, chatId);
-  await enviarMensagem(tel, '✅ *Confirma o pedido?*\n\n1️⃣ Sim\n2️⃣ Não', chatId);
+  if (opcao === '2') {
+    dados.forma_pagamento = 'Dinheiro';
+    dados.troco = 0;
+    delete dados.valor_pago_dinheiro;
+    setSessao(tel, ESTADOS.ESCOLHER_TROCO, dados, chatId);
+    await enviarMensagem(
+      tel,
+      '💵 *Pagamento em dinheiro*\n\nPrecisa de troco?\n\n1️⃣ Sim\n2️⃣ Não',
+      chatId
+    );
+    return;
+  }
+
+  await enviarMensagem(tel, 'Escolha *1️⃣ PIX* ou *2️⃣ Dinheiro*', chatId);
+}
+
+async function handleEscolherTroco(tel, texto, dados, chatId) {
+  const opcao = normalizarTextoPedido(texto).replace(/\D/g, '');
+  const total = calcularResumo(dados.carrinho || [], dados).valor_total;
+
+  if (opcao === '2') {
+    dados.troco = 0;
+    delete dados.valor_pago_dinheiro;
+    await irParaConfirmarPedido(tel, dados, chatId);
+    return;
+  }
+
+  if (opcao === '1') {
+    setSessao(tel, ESTADOS.VALOR_DINHEIRO, dados, chatId);
+    await enviarMensagem(
+      tel,
+      `Com quanto você vai pagar?\n\nTotal do pedido: *${fmtMoeda(total)}*\n\nInforme o valor (ex: *100* ou *100,50*):`,
+      chatId
+    );
+    return;
+  }
+
+  await enviarMensagem(tel, 'Responda *1️⃣ Sim* (preciso de troco) ou *2️⃣ Não*', chatId);
+}
+
+async function handleValorDinheiro(tel, texto, dados, chatId) {
+  const total = calcularResumo(dados.carrinho || [], dados).valor_total;
+  const pago = parseValorMonetario(texto);
+
+  if (pago == null) {
+    await enviarMensagem(tel, 'Informe um valor válido. Ex: *50* ou *120,00*', chatId);
+    return;
+  }
+
+  if (pago < total) {
+    await enviarMensagem(
+      tel,
+      `O valor informado (${fmtMoeda(pago)}) é menor que o total (${fmtMoeda(total)}).\n\nInforme um valor *maior ou igual* ao total:`,
+      chatId
+    );
+    return;
+  }
+
+  dados.valor_pago_dinheiro = pago;
+  dados.troco = Math.round((pago - total) * 100) / 100;
+
+  await enviarMensagem(
+    tel,
+    dados.troco > 0
+      ? `🔄 Troco calculado: *${fmtMoeda(dados.troco)}*\n(Pagamento ${fmtMoeda(pago)} − total ${fmtMoeda(total)})`
+      : `✅ Valor exato: *${fmtMoeda(pago)}* (sem troco)`,
+    chatId
+  );
+  await irParaConfirmarPedido(tel, dados, chatId);
 }
 
 async function iniciarAtendimento(tel, dados, chatId) {
@@ -513,6 +599,8 @@ function podeReiniciarPorSaudacao(sessao) {
     ESTADOS.CONFIRMAR_DADOS,
     ESTADOS.ESCOLHER_ENTREGA,
     ESTADOS.ESCOLHER_PAGAMENTO,
+    ESTADOS.ESCOLHER_TROCO,
+    ESTADOS.VALOR_DINHEIRO,
     ESTADOS.PEDIDO_NOME,
     ESTADOS.PEDIDO_ENDERECO,
     ESTADOS.PEDIDO_TELEFONE
@@ -552,6 +640,12 @@ async function processarMensagem(telefone, mensagem, chatId) {
       break;
     case ESTADOS.ESCOLHER_PAGAMENTO:
       await handleEscolherPagamento(tel, texto, dados, chatIdNorm);
+      break;
+    case ESTADOS.ESCOLHER_TROCO:
+      await handleEscolherTroco(tel, texto, dados, chatIdNorm);
+      break;
+    case ESTADOS.VALOR_DINHEIRO:
+      await handleValorDinheiro(tel, texto, dados, chatIdNorm);
       break;
     case ESTADOS.PEDIDO_NOME:
       await handlePedidoNome(tel, texto, dados, chatIdNorm);
@@ -716,6 +810,12 @@ async function enviarResumo(tel, dados, chatId) {
   if (dados.forma_pagamento) {
     texto += `\n💳 Pagamento: *${dados.forma_pagamento}*`;
   }
+  if (dados.forma_pagamento === 'Dinheiro' && dados.valor_pago_dinheiro) {
+    texto += `\n💵 Valor pago: ${fmtMoeda(dados.valor_pago_dinheiro)}`;
+    if (dados.troco > 0) {
+      texto += `\n🔄 Troco: *${fmtMoeda(dados.troco)}*`;
+    }
+  }
 
   await enviarMensagem(tel, texto, chatId);
 }
@@ -745,12 +845,18 @@ async function handleConfirmar(tel, opcao, dados, chatId) {
       await enviarMensagem(tel, copiaECola, chatId);
       await enviarMensagem(tel, `Depois de pagar, é só aguardar. 🥟\n\n${msgFinal}`, chatId);
     } else {
-      const onde = retirada
+      let msgDinheiro = retirada
         ? `Pague em *dinheiro* na retirada${getEnderecoLoja() ? `:\n📍 ${getEnderecoLoja()}` : '.'}`
         : 'Pague em *dinheiro* na entrega.';
+      if (dados.valor_pago_dinheiro) {
+        msgDinheiro += `\n💵 Valor informado: *${fmtMoeda(dados.valor_pago_dinheiro)}*`;
+      }
+      if (dados.troco > 0) {
+        msgDinheiro += `\n🔄 Troco: *${fmtMoeda(dados.troco)}*`;
+      }
       await enviarMensagem(
         tel,
-        `✅ *Pedido #${pedido.numero} recebido e enviado para produção!*\n\n💵 ${onde}\n\nTotal: *${fmtMoeda(resumo.valor_total)}*\n\n${msgFinal}`,
+        `✅ *Pedido #${pedido.numero} recebido e enviado para produção!*\n\n${msgDinheiro}\n\nTotal: *${fmtMoeda(resumo.valor_total)}*\n\n${msgFinal}`,
         chatId
       );
     }
@@ -774,6 +880,7 @@ async function criarPedido(tel, dados, chatId, formaPagamento) {
     taxa_entrega: resumo.taxa_entrega,
     valor_total: resumo.valor_total,
     forma_pagamento: formaPagamento || dados.forma_pagamento || null,
+    troco: dados.troco || 0,
     endereco: enderecoNoPedido(dados),
     observacoes: dados.tipo_entrega === 'retirada' ? 'Retirada na loja' : null,
     origem: 'whatsapp',
