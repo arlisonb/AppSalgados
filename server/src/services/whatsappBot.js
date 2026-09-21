@@ -73,14 +73,14 @@ async function resetPorInatividade(telefone, chatId) {
 
   const tel = String(telefone || '').replace(/\D/g, '');
   const chat = chatIdNorm || sessao.dados?.chat_id || getChatId(tel, sessao.dados);
-  console.log(`Atendimento WhatsApp reiniciado por inatividade: ${chat || tel}`);
+  console.log(`Carrinho WhatsApp cancelado por inatividade (sem mensagem): ${chat || tel}`);
 
   clearInactivityTimer(telefone, chatIdNorm);
-  const dadosLimpos = { chat_id: chat, carrinho: [] };
-  await iniciarCardapio(tel, dadosLimpos, chat, {
-    omitirSaudacao: true,
-    prefixo: '⏱️ *Atendimento reiniciado* — ficamos 2 minutos sem sua resposta.\n\nSeu carrinho foi esvaziado.'
-  });
+  setSessao(tel, ESTADOS.ESCOLHENDO_ITENS, {
+    chat_id: chat,
+    carrinho: [],
+    atendimento_expirado: true
+  }, chat);
 }
 
 function touchInactivityTimer(telefone, chatId) {
@@ -88,7 +88,11 @@ function touchInactivityTimer(telefone, chatId) {
   if (!key) return;
 
   const sessao = getSessao(telefone, chatId);
-  if (sessao.estado === ESTADOS.CONFIRMAR_ENTREGA) {
+  if (sessao.estado === ESTADOS.CONFIRMAR_ENTREGA || sessao.dados?.atendimento_expirado) {
+    clearInactivityTimer(telefone, chatId);
+    return;
+  }
+  if (!sessaoTemProgresso(sessao)) {
     clearInactivityTimer(telefone, chatId);
     return;
   }
@@ -685,6 +689,13 @@ async function processarMensagem(telefone, mensagem, chatId) {
   salvarMensagem(tel || chatIdNorm, 'entrada', mensagem, dados.cliente_id);
 
   try {
+  if (dados.atendimento_expirado) {
+    delete dados.atendimento_expirado;
+    clearInactivityTimer(tel, chatIdNorm);
+    await iniciarAtendimento(tel, { chat_id: chatIdNorm, carrinho: [] }, chatIdNorm);
+    return;
+  }
+
   if (isSaudacao(textoLower) && podeReiniciarPorSaudacao(sessao)) {
     clearInactivityTimer(tel, chatIdNorm);
     await iniciarAtendimento(tel, { chat_id: chatIdNorm, carrinho: [] }, chatIdNorm);
