@@ -13,6 +13,8 @@ let io = null;
 
 const ESTADOS = {
   ESCOLHENDO_ITENS: 'escolhendo_itens',
+  ESCOLHER_ENTREGA: 'escolher_entrega',
+  ESCOLHER_PAGAMENTO: 'escolher_pagamento',
   PEDIDO_NOME: 'pedido_nome',
   PEDIDO_ENDERECO: 'pedido_endereco',
   PEDIDO_TELEFONE: 'pedido_telefone',
@@ -227,8 +229,21 @@ function getCardapioNumerado(opts = {}) {
   return { texto, produtos, opcoes };
 }
 
+function getEnderecoLoja() {
+  return String(configRepo.getConfig('endereco') || '').trim();
+}
+
+function enderecoNoPedido(dados) {
+  if (dados.tipo_entrega === 'retirada') {
+    const loja = getEnderecoLoja();
+    return loja ? `Retirada — ${loja}` : 'Retirada no local';
+  }
+  return dados.endereco || '';
+}
+
 function calcularResumo(carrinho, dados) {
-  const taxaEntrega = parseFloat(configRepo.getConfig('taxa_entrega') || '0');
+  const taxaConfig = parseFloat(configRepo.getConfig('taxa_entrega') || '0');
+  const taxaEntrega = dados?.tipo_entrega === 'retirada' ? 0 : taxaConfig;
   let valorItens = 0;
 
   const itens = carrinho.map((item) => {
@@ -299,33 +314,128 @@ async function finalizarPedido(tel, dados, carrinho, chatId) {
   }
 
   dados.carrinho = carrinho;
+  delete dados.tipo_entrega;
+  delete dados.forma_pagamento;
+  setSessao(tel, ESTADOS.ESCOLHER_ENTREGA, dados, chatId);
 
-  if (dados.nome && dados.endereco && dados.telefone) {
+  const enderecoLoja = getEnderecoLoja();
+  let texto = `${getResumoCarrinhoTexto(carrinho)}\n\n📦 *Como deseja receber?*\n\n`;
+  texto += '1️⃣ *Entrega* no seu endereço\n';
+  texto += '2️⃣ *Retirada* na loja';
+  if (enderecoLoja) {
+    texto += `\n   📍 ${enderecoLoja}`;
+  } else {
+    texto += '\n   _(Configure o endereço da loja em Configurações)_';
+  }
+  texto += '\n\nResponda *1* ou *2*';
+
+  await enviarMensagem(tel, texto, chatId);
+}
+
+async function handleEscolherEntrega(tel, texto, dados, chatId) {
+  const opcao = normalizarTextoPedido(texto).replace(/\D/g, '');
+
+  if (opcao === '1') {
+    dados.tipo_entrega = 'entrega';
+    await continuarColetaDadosCliente(tel, dados, chatId);
+    return;
+  }
+
+  if (opcao === '2') {
+    dados.tipo_entrega = 'retirada';
+    await continuarColetaDadosCliente(tel, dados, chatId);
+    return;
+  }
+
+  await enviarMensagem(tel, 'Escolha *1️⃣ Entrega* ou *2️⃣ Retirada na loja*', chatId);
+}
+
+async function continuarColetaDadosCliente(tel, dados, chatId) {
+  const carrinho = dados.carrinho || [];
+  const retirada = dados.tipo_entrega === 'retirada';
+
+  if (!retirada && dados.nome && dados.endereco && dados.telefone) {
     const cliente = clienteRepo.findOrCreate({
       nome: dados.nome,
       telefone: dados.telefone,
       endereco: dados.endereco
     });
     dados.cliente_id = cliente.id;
-    setSessao(tel, ESTADOS.CONFIRMAR, dados, chatId);
-    await enviarResumo(tel, dados, chatId);
-    await enviarMensagem(tel, '✅ *Confirma o pedido?*\n\n1️⃣ Sim\n2️⃣ Não', chatId);
+    await irParaEscolherPagamento(tel, dados, chatId);
+    return;
+  }
+
+  if (retirada && dados.nome && dados.telefone) {
+    const cliente = clienteRepo.findOrCreate({
+      nome: dados.nome,
+      telefone: dados.telefone,
+      endereco: dados.endereco || null
+    });
+    dados.cliente_id = cliente.id;
+    await irParaEscolherPagamento(tel, dados, chatId);
     return;
   }
 
   if (dados.cliente_cadastrado) {
     const c = dados.cliente_cadastrado;
     setSessao(tel, ESTADOS.CONFIRMAR_DADOS, dados, chatId);
-    await enviarMensagem(
-      tel,
-      `${getResumoCarrinhoTexto(carrinho)}\n\n📋 *Seus dados do último pedido:*\n👤 ${c.nome}\n📍 ${c.endereco}\n📱 ${c.telefone}\n\nSão os mesmos?\n\n1️⃣ Sim\n2️⃣ Não`,
-      chatId
-    );
+    if (retirada) {
+      const loja = getEnderecoLoja() || 'Endereço da loja (consulte-nos)';
+      await enviarMensagem(
+        tel,
+        `${getResumoCarrinhoTexto(carrinho)}\n\n🏪 *Retirada na loja*\n📍 ${loja}\n\n📋 *Seus dados:*\n👤 ${c.nome}\n📱 ${c.telefone}\n\nEstá correto?\n\n1️⃣ Sim\n2️⃣ Não`,
+        chatId
+      );
+    } else {
+      await enviarMensagem(
+        tel,
+        `${getResumoCarrinhoTexto(carrinho)}\n\n📋 *Seus dados do último pedido:*\n👤 ${c.nome}\n📍 ${c.endereco}\n📱 ${c.telefone}\n\nSão os mesmos?\n\n1️⃣ Sim\n2️⃣ Não`,
+        chatId
+      );
+    }
     return;
   }
 
   setSessao(tel, ESTADOS.PEDIDO_NOME, dados, chatId);
-  await enviarMensagem(tel, `${getResumoCarrinhoTexto(carrinho)}\n\nQual é o seu *nome*?`, chatId);
+  const intro = retirada
+    ? `${getResumoCarrinhoTexto(carrinho)}\n\n🏪 Retirada na loja.\n\nQual é o seu *nome*?`
+    : `${getResumoCarrinhoTexto(carrinho)}\n\nQual é o seu *nome*?`;
+  await enviarMensagem(tel, intro, chatId);
+}
+
+async function irParaEscolherPagamento(tel, dados, chatId) {
+  setSessao(tel, ESTADOS.ESCOLHER_PAGAMENTO, dados, chatId);
+  const temPix = !!(configRepo.getConfig('pix') || '').trim();
+  let texto = '💳 *Forma de pagamento:*\n\n';
+  texto += '1️⃣ PIX\n';
+  texto += '2️⃣ Dinheiro';
+  if (!temPix) {
+    texto += '\n\n_(PIX ainda não configurado — escolha dinheiro ou fale conosco)_';
+  }
+  texto += '\n\nResponda *1* ou *2*';
+  await enviarMensagem(tel, texto, chatId);
+}
+
+async function handleEscolherPagamento(tel, texto, dados, chatId) {
+  const opcao = normalizarTextoPedido(texto).replace(/\D/g, '');
+  const temPix = !!(configRepo.getConfig('pix') || '').trim();
+
+  if (opcao === '1') {
+    if (!temPix) {
+      await enviarMensagem(tel, 'PIX indisponível no momento. Escolha *2️⃣ Dinheiro* ou digite *OI* para falar conosco.', chatId);
+      return;
+    }
+    dados.forma_pagamento = 'PIX';
+  } else if (opcao === '2') {
+    dados.forma_pagamento = 'Dinheiro';
+  } else {
+    await enviarMensagem(tel, 'Escolha *1️⃣ PIX* ou *2️⃣ Dinheiro*', chatId);
+    return;
+  }
+
+  setSessao(tel, ESTADOS.CONFIRMAR, dados, chatId);
+  await enviarResumo(tel, dados, chatId);
+  await enviarMensagem(tel, '✅ *Confirma o pedido?*\n\n1️⃣ Sim\n2️⃣ Não', chatId);
 }
 
 async function iniciarAtendimento(tel, dados, chatId) {
@@ -357,18 +467,18 @@ async function handleConfirmarDados(tel, texto, dados, chatId) {
   if (opcao === '1') {
     const c = dados.cliente_cadastrado;
     dados.nome = c.nome;
-    dados.endereco = c.endereco;
     dados.telefone = c.telefone;
+    if (dados.tipo_entrega !== 'retirada') {
+      dados.endereco = c.endereco;
+    }
     delete dados.cliente_cadastrado;
     const cliente = clienteRepo.findOrCreate({
       nome: dados.nome,
       telefone: dados.telefone,
-      endereco: dados.endereco
+      endereco: dados.tipo_entrega === 'retirada' ? (c.endereco || null) : dados.endereco
     });
     dados.cliente_id = cliente.id;
-    setSessao(tel, ESTADOS.CONFIRMAR, dados, chatId);
-    await enviarResumo(tel, dados, chatId);
-    await enviarMensagem(tel, '✅ *Confirma o pedido?*\n\n1️⃣ Sim\n2️⃣ Não', chatId);
+    await irParaEscolherPagamento(tel, dados, chatId);
     return;
   }
 
@@ -401,6 +511,8 @@ function podeReiniciarPorSaudacao(sessao) {
   const fluxoAtivo = [
     ESTADOS.CONFIRMAR,
     ESTADOS.CONFIRMAR_DADOS,
+    ESTADOS.ESCOLHER_ENTREGA,
+    ESTADOS.ESCOLHER_PAGAMENTO,
     ESTADOS.PEDIDO_NOME,
     ESTADOS.PEDIDO_ENDERECO,
     ESTADOS.PEDIDO_TELEFONE
@@ -434,6 +546,12 @@ async function processarMensagem(telefone, mensagem, chatId) {
       break;
     case ESTADOS.CONFIRMAR_DADOS:
       await handleConfirmarDados(tel, texto, dados, chatIdNorm);
+      break;
+    case ESTADOS.ESCOLHER_ENTREGA:
+      await handleEscolherEntrega(tel, texto, dados, chatIdNorm);
+      break;
+    case ESTADOS.ESCOLHER_PAGAMENTO:
+      await handleEscolherPagamento(tel, texto, dados, chatIdNorm);
       break;
     case ESTADOS.PEDIDO_NOME:
       await handlePedidoNome(tel, texto, dados, chatIdNorm);
@@ -542,6 +660,11 @@ async function handleEscolhendoItens(tel, texto, textoLower, sessao, chatId) {
 
 async function handlePedidoNome(tel, mensagem, dados, chatId) {
   dados.nome = mensagem.trim();
+  if (dados.tipo_entrega === 'retirada') {
+    setSessao(tel, ESTADOS.PEDIDO_TELEFONE, dados, chatId);
+    await enviarMensagem(tel, `Prazer, ${dados.nome}! 😊\n\nQual é o seu *telefone* para contato?`, chatId);
+    return;
+  }
   setSessao(tel, ESTADOS.PEDIDO_ENDERECO, dados, chatId);
   await enviarMensagem(tel, `Prazer, ${dados.nome}! 😊\n\nQual é o seu *endereço* para entrega?`, chatId);
 }
@@ -558,21 +681,15 @@ async function handlePedidoTelefone(tel, mensagem, dados, chatId) {
   const cliente = clienteRepo.findOrCreate({
     nome: dados.nome,
     telefone: dados.telefone,
-    endereco: dados.endereco
+    endereco: dados.tipo_entrega === 'retirada' ? null : dados.endereco
   });
   dados.cliente_id = cliente.id;
 
   if (dados.atualizar_cadastro) {
     delete dados.atualizar_cadastro;
-    setSessao(tel, ESTADOS.CONFIRMAR, dados, chatId);
-    await enviarResumo(tel, dados, chatId);
-    await enviarMensagem(tel, '✅ *Confirma o pedido?*\n\n1️⃣ Sim\n2️⃣ Não', chatId);
-    return;
   }
 
-  setSessao(tel, ESTADOS.CONFIRMAR, dados, chatId);
-  await enviarResumo(tel, dados, chatId);
-  await enviarMensagem(tel, '✅ *Confirma o pedido?*\n\n1️⃣ Sim\n2️⃣ Não', chatId);
+  await irParaEscolherPagamento(tel, dados, chatId);
 }
 
 async function enviarResumo(tel, dados, chatId) {
@@ -583,24 +700,35 @@ async function enviarResumo(tel, dados, chatId) {
     texto += `• ${item.quantidade}un ${item.nome_produto} — R$ ${item.subtotal.toFixed(2)}\n`;
   });
 
-  if (resumo.taxa_entrega > 0) {
+  if (dados.tipo_entrega === 'retirada') {
+    texto += '\n🏪 *Retirada na loja* (sem taxa de entrega)';
+  } else if (resumo.taxa_entrega > 0) {
     texto += `\n📦 Entrega: R$ ${resumo.taxa_entrega.toFixed(2)}`;
   }
   texto += `\n💰 *TOTAL: R$ ${resumo.valor_total.toFixed(2)}*`;
   texto += `\n\n👤 ${dados.nome}`;
-  texto += `\n📍 ${dados.endereco}`;
+  if (dados.tipo_entrega === 'retirada') {
+    texto += `\n📍 ${getEnderecoLoja() || 'Retirada no local'}`;
+  } else {
+    texto += `\n📍 ${dados.endereco}`;
+  }
   texto += `\n📱 ${dados.telefone}`;
+  if (dados.forma_pagamento) {
+    texto += `\n💳 Pagamento: *${dados.forma_pagamento}*`;
+  }
 
   await enviarMensagem(tel, texto, chatId);
 }
 
 async function handleConfirmar(tel, opcao, dados, chatId) {
   if (opcao === '1') {
-    const chavePix = (configRepo.getConfig('pix') || '').trim();
-    const { pedido, resumo } = await criarPedido(tel, dados, chatId, chavePix ? 'pix' : null);
+    const forma = dados.forma_pagamento || 'Dinheiro';
+    const { pedido, resumo } = await criarPedido(tel, dados, chatId, forma);
     const msgFinal = configRepo.getConfig('mensagem_final') || 'Obrigado pela preferência!';
+    const retirada = dados.tipo_entrega === 'retirada';
 
-    if (chavePix) {
+    if (forma === 'PIX') {
+      const chavePix = (configRepo.getConfig('pix') || '').trim();
       const copiaECola = gerarPixCopiaECola({
         chave: chavePix,
         nome: configRepo.getConfig('nome_empresa') || 'Iona Salgados',
@@ -617,9 +745,12 @@ async function handleConfirmar(tel, opcao, dados, chatId) {
       await enviarMensagem(tel, copiaECola, chatId);
       await enviarMensagem(tel, `Depois de pagar, é só aguardar. 🥟\n\n${msgFinal}`, chatId);
     } else {
+      const onde = retirada
+        ? `Pague em *dinheiro* na retirada${getEnderecoLoja() ? `:\n📍 ${getEnderecoLoja()}` : '.'}`
+        : 'Pague em *dinheiro* na entrega.';
       await enviarMensagem(
         tel,
-        `✅ *Pedido #${pedido.numero} recebido!*\n\nSeu pedido já foi enviado para produção.\n\n${msgFinal}`,
+        `✅ *Pedido #${pedido.numero} recebido e enviado para produção!*\n\n💵 ${onde}\n\nTotal: *${fmtMoeda(resumo.valor_total)}*\n\n${msgFinal}`,
         chatId
       );
     }
@@ -642,8 +773,9 @@ async function criarPedido(tel, dados, chatId, formaPagamento) {
     valor_itens: resumo.valor_itens,
     taxa_entrega: resumo.taxa_entrega,
     valor_total: resumo.valor_total,
-    forma_pagamento: formaPagamento,
-    endereco: dados.endereco,
+    forma_pagamento: formaPagamento || dados.forma_pagamento || null,
+    endereco: enderecoNoPedido(dados),
+    observacoes: dados.tipo_entrega === 'retirada' ? 'Retirada na loja' : null,
     origem: 'whatsapp',
     whatsapp_chat_id: dados.chat_id || chatId,
     itens: resumo.itens
