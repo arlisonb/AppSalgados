@@ -128,6 +128,25 @@ router.patch('/pedidos/:id/status', async (req, res) => {
   }
   if (status === 'finalizado') io?.emit('pedidoFinalizado', pedido);
 
+  if ((status === 'pronto' || status === 'saiu_entrega') && entregaService.isRetirada(pedido)) {
+    let aviso = pedido;
+    if (status === 'saiu_entrega') {
+      aviso = pedidoRepo.updateStatus(pedido.id, 'pronto', req.body.usuario) || pedido;
+      io?.emit('pedidoAtualizado', aviso);
+    }
+    try {
+      await entregaService.notificarPedidoPronto(aviso, io);
+    } catch (err) {
+      console.error('Erro ao avisar retirada no WhatsApp:', err.message);
+      return res.status(502).json({
+        error: 'Status atualizado, mas não foi possível avisar o cliente no WhatsApp',
+        pedido: aviso,
+        whatsapp_erro: err.message
+      });
+    }
+    return res.json(aviso);
+  }
+
   if (status === 'saiu_entrega') {
     try {
       await entregaService.notificarSaidaEntrega(pedido, io);

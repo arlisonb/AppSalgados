@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.ionasalgados.app.domain.model.Pedido
@@ -172,6 +173,43 @@ fun PedidoDetalheScreen(
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
                     when (p.status) {
+                        StatusPedido.PRONTO -> {
+                            if (p.isRetirada()) {
+                                Text(
+                                    "Pedido pronto para retirada. Cliente avisado no WhatsApp.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MarromSuave.copy(alpha = 0.7f)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.reimprimir() },
+                                        modifier = Modifier.weight(1f).height(52.dp),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) { Text("Imprimir") }
+                                    Button(
+                                        onClick = { viewModel.updateStatus(p.id, StatusPedido.FINALIZADO) },
+                                        modifier = Modifier.weight(1f).height(52.dp),
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))
+                                    ) { Text("Concluir") }
+                                }
+                            } else {
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.reimprimir() },
+                                        modifier = Modifier.weight(1f).height(52.dp),
+                                        shape = RoundedCornerShape(14.dp)
+                                    ) { Text("Imprimir") }
+                                    Button(
+                                        onClick = { viewModel.updateStatus(p.id, StatusPedido.SAIU_ENTREGA) },
+                                        modifier = Modifier.weight(1f).height(52.dp),
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = LaranjaIona)
+                                    ) { Text("Saiu p/ Entrega") }
+                                }
+                            }
+                        }
                         StatusPedido.SAIU_ENTREGA -> {
                             Text(
                                 "🛵 Aguardando confirmação do cliente no WhatsApp",
@@ -213,11 +251,16 @@ fun PedidoDetalheScreen(
                                     shape = RoundedCornerShape(14.dp)
                                 ) { Text("Imprimir") }
                                 Button(
-                                    onClick = { viewModel.updateStatus(p.id, StatusPedido.SAIU_ENTREGA) },
+                                    onClick = {
+                                        viewModel.updateStatus(
+                                            p.id,
+                                            if (p.isRetirada()) StatusPedido.PRONTO else StatusPedido.SAIU_ENTREGA
+                                        )
+                                    },
                                     modifier = Modifier.weight(1f).height(52.dp),
                                     shape = RoundedCornerShape(14.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = LaranjaIona)
-                                ) { Text("Saiu p/ Entrega") }
+                                ) { Text(if (p.isRetirada()) "Pedido pronto" else "Saiu p/ Entrega") }
                             }
                         }
                     }
@@ -229,12 +272,26 @@ fun PedidoDetalheScreen(
 }
 
 @Composable
+private fun Pedido.isRetirada(): Boolean {
+    val end = endereco.orEmpty()
+    val obs = observacoes.orEmpty()
+    return end.startsWith("Retirada", ignoreCase = true) ||
+        obs.contains("Retirada", ignoreCase = true)
+}
+
 private fun InfoRow(label: String, valor: String, bold: Boolean = false) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(label, color = MarromSuave.copy(alpha = 0.7f))
-        Text(valor, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, color = MarromSuave)
+        Spacer(modifier = Modifier.width(12.dp))
+        Text(
+            valor,
+            modifier = Modifier.weight(1f),
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+            color = MarromSuave,
+            textAlign = TextAlign.End
+        )
     }
 }

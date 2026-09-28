@@ -166,9 +166,15 @@ async function abrirPedido(id) {
              <button class="btn sm outline" id="btn-imprimir">🖨 Imprimir</button>
              <button class="btn sm primary" data-status="finalizado">Marcar como entregue</button>
            </div>`
+        : p.status === 'pronto' && /retirada/i.test(`${p.observacoes || ''} ${p.endereco || ''}`)
+        ? `<p class="meta">Pedido pronto para retirada. Cliente avisado no WhatsApp.</p>
+           <div class="btn-row">
+             <button class="btn sm outline" id="btn-imprimir">🖨 Imprimir</button>
+             <button class="btn sm primary" data-status="finalizado">Concluir</button>
+           </div>`
         : `<div class="btn-row">
              <button class="btn sm outline" id="btn-imprimir">🖨 Imprimir</button>
-             <button class="btn sm primary" data-status="saiu_entrega">${statusLabels.saiu_entrega}</button>
+             <button class="btn sm primary" data-status="${/retirada/i.test(`${p.observacoes || ''} ${p.endereco || ''}`) ? 'pronto' : 'saiu_entrega'}">${/retirada/i.test(`${p.observacoes || ''} ${p.endereco || ''}`) ? 'Pedido pronto' : statusLabels.saiu_entrega}</button>
            </div>`
       }
     </div>

@@ -1,6 +1,7 @@
 const whatsappService = require('./whatsappService');
 const whatsappBot = require('./whatsappBot');
 const pedidoRepo = require('../repositories/pedidoRepository');
+const configRepo = require('../repositories/configRepository');
 
 function normalizePhone(phone) {
   let clean = String(phone || '').replace(/\D/g, '');
@@ -16,6 +17,43 @@ function getChatId(pedido) {
   if (historico) return historico;
   const tel = normalizePhone(pedido.cliente_telefone);
   return tel ? `${tel}@c.us` : null;
+}
+
+function isRetirada(pedido) {
+  const obs = String(pedido?.observacoes || '');
+  const end = String(pedido?.endereco || '');
+  return /retirada/i.test(obs) || /^retirada\b/i.test(end);
+}
+
+function enderecoRetirada(pedido) {
+  const loja = String(configRepo.getConfig('endereco') || '').trim();
+  if (loja) return loja;
+  return String(pedido?.endereco || '').replace(/^retirada\s*[—-]\s*/i, '').trim();
+}
+
+async function notificarPedidoPronto(pedido, socketIo) {
+  const telefone = normalizePhone(pedido.cliente_telefone);
+  const chatId = getChatId(pedido);
+
+  if (!telefone || !chatId) {
+    throw new Error('Cliente sem telefone cadastrado para aviso no WhatsApp');
+  }
+
+  if (!pedido.whatsapp_chat_id) {
+    pedidoRepo.updateWhatsAppChatId(pedido.id, chatId);
+    pedido.whatsapp_chat_id = chatId;
+  }
+
+  const endereco = enderecoRetirada(pedido);
+  const texto = [
+    `✅ *Pedido #${pedido.numero} está pronto!*`,
+    '',
+    '🏪 Pode retirar no local:',
+    endereco ? `📍 ${endereco}` : '📍 Retirada no local'
+  ].join('\n');
+
+  await whatsappService.enviarMensagemDireta(telefone, texto, chatId);
+  console.log(`Aviso de retirada enviado — Pedido #${pedido.numero} → ${telefone}`);
 }
 
 async function notificarSaidaEntrega(pedido, socketIo) {
@@ -46,4 +84,4 @@ async function notificarSaidaEntrega(pedido, socketIo) {
   console.log(`Aviso de entrega enviado — Pedido #${pedido.numero} → ${telefone}`);
 }
 
-module.exports = { notificarSaidaEntrega, normalizePhone, getChatId };
+module.exports = { notificarSaidaEntrega, notificarPedidoPronto, isRetirada, normalizePhone, getChatId };

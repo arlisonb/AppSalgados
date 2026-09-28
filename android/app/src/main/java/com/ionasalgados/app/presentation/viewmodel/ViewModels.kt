@@ -262,6 +262,7 @@ class PedidoDetalheViewModel @Inject constructor(
                     _pedido.value = it
                     _message.value = when (status) {
                         StatusPedido.SAIU_ENTREGA -> "Cliente avisado no WhatsApp!"
+                        StatusPedido.PRONTO -> "Cliente avisado: pedido pronto para retirada!"
                         StatusPedido.FINALIZADO -> "Pedido marcado como entregue!"
                         else -> ""
                     }
