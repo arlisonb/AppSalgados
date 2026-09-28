@@ -903,6 +903,10 @@ async function handleConfirmar(tel, opcao, dados, chatId) {
     const { pedido, resumo } = await criarPedido(tel, dados, chatId, forma);
     const msgFinal = configRepo.getConfig('mensagem_final') || 'Obrigado pela preferência!';
     const retirada = dados.tipo_entrega === 'retirada';
+    const enderecoLoja = getEnderecoLoja();
+    const cabecalho = retirada
+      ? `✅ *Pedido #${pedido.numero} confirmado!*\n\n🏪 Seu pedido pode ser *retirado no local*${enderecoLoja ? `:\n📍 ${enderecoLoja}` : '.'}`
+      : `✅ *Pedido #${pedido.numero} recebido e enviado para produção!`;
 
     if (forma === 'PIX') {
       const chavePix = (configRepo.getConfig('pix') || '').trim();
@@ -916,14 +920,20 @@ async function handleConfirmar(tel, opcao, dados, chatId) {
 
       await enviarMensagem(
         tel,
-        `✅ *Pedido #${pedido.numero} recebido e enviado para produção!*\n\n💠 *Pagamento via PIX — ${fmtMoeda(resumo.valor_total)}*\n\nCopie o código abaixo e pague no app do seu banco (opção *PIX Copia e Cola*):`,
+        `${cabecalho}\n\n💠 *Pagamento via PIX — ${fmtMoeda(resumo.valor_total)}*\n\nCopie o código abaixo e pague no app do seu banco (opção *PIX Copia e Cola*):`,
         chatId
       );
       await enviarMensagem(tel, copiaECola, chatId);
-      await enviarMensagem(tel, `Depois de pagar, é só aguardar. 🥟\n\n${msgFinal}`, chatId);
+      await enviarMensagem(
+        tel,
+        retirada
+          ? `Depois de pagar, retire no local. 🥟\n\n${msgFinal}`
+          : `Depois de pagar, é só aguardar. 🥟\n\n${msgFinal}`,
+        chatId
+      );
     } else {
       let msgDinheiro = retirada
-        ? `Pague em *dinheiro* na retirada${getEnderecoLoja() ? `:\n📍 ${getEnderecoLoja()}` : '.'}`
+        ? 'Pague em *dinheiro* na retirada.'
         : 'Pague em *dinheiro* na entrega.';
       if (dados.valor_pago_dinheiro) {
         msgDinheiro += `\n💵 Valor informado: *${fmtMoeda(dados.valor_pago_dinheiro)}*`;
@@ -933,7 +943,7 @@ async function handleConfirmar(tel, opcao, dados, chatId) {
       }
       await enviarMensagem(
         tel,
-        `✅ *Pedido #${pedido.numero} recebido e enviado para produção!*\n\n${msgDinheiro}\n\nTotal: *${fmtMoeda(resumo.valor_total)}*\n\n${msgFinal}`,
+        `${cabecalho}\n\n${msgDinheiro}\n\nTotal: *${fmtMoeda(resumo.valor_total)}*\n\n${msgFinal}`,
         chatId
       );
     }
